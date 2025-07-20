@@ -135,6 +135,13 @@ export default function WatchPage() {
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       <div className="max-w-4xl mx-auto">
+        {/* 📱 PiP Info Banner (mobile only) */}
+        <div className="block sm:hidden mb-2">
+          <div className="bg-blue-100 text-blue-800 text-sm rounded px-3 py-2 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12.37V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2h7.37M17 17h4v4h-4v-4z" /></svg>
+            <span>Tip: Tap the PiP icon in the YouTube player to watch in Picture-in-Picture mode.</span>
+          </div>
+        </div>
         {/* 📺 Video Player */}
         <Card className="w-full shadow-xl rounded-2xl overflow-hidden mb-4">
           <CardContent className="relative aspect-video p-0">
