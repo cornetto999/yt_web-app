@@ -188,8 +188,8 @@ export default function HomePage() {
           </div>
         ) : Array.isArray(videos) && videos.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-            {videos.map((video) => (
-              <VideoCard key={video.id} video={video} />
+            {videos.map((video, idx) => (
+              <VideoCard key={String(video.id?.videoId || video.id || video.title || idx)} video={video} />
             ))}
           </div>
         ) : showNoVideos && !loading && (!usedFallback || (usedFallback && videos.length === 0)) ? (

@@ -19,16 +19,18 @@ export default function WatchPage() {
   const [autoplay, setAutoplay] = useState(true);
   const [loop, setLoop] = useState(false); // Loop playlist state
   const [minimized, setMinimized] = useState(false); // Mini-player state
-  const iframeRef = useRef(null);
+  const [categoryId, setCategoryId] = useState(null); // Store categoryId for related videos
   const playerRef = useRef(null);
+  const [playerReady, setPlayerReady] = useState(false); // Track if player is ready
 
   const localKey = `video-${id}`;
-  const videoId = queue[currentIndex]?.id?.videoId || id;
+  // Always use the id from the URL for the main video player
+  const videoId = id;
   const videoUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&rel=0&modestbranding=1&showinfo=0&iv_load_policy=3`;
 
 
 
-  // Load YouTube IFrame API once
+  // Load YouTube IFrame API once and create player on mount
   useEffect(() => {
     if (!window.YT) {
       const tag = document.createElement('script');
@@ -40,7 +42,16 @@ export default function WatchPage() {
     window.onYouTubeIframeAPIReady = () => {
       setupPlayer();
     };
+    // eslint-disable-next-line
   }, []);
+
+  // When videoId changes, load new video if player is ready
+  useEffect(() => {
+    if (playerReady && playerRef.current && typeof playerRef.current.loadVideoById === 'function') {
+      playerRef.current.loadVideoById(videoId);
+    }
+    // eslint-disable-next-line
+  }, [videoId, playerReady]);
 
   // Fetch video details, comments, and related videos (queue)
   useEffect(() => {
@@ -48,43 +59,81 @@ export default function WatchPage() {
     setLoading(true);
     fetchVideoDetails(id);
     fetchComments(id);
-    fetchQueue(id);
-    // eslint-disable-next-line
+    // fetchQueue now depends on categoryId
   }, [id]);
 
-  // Update currentIndex when id changes (if not in queue, reset to 0)
+  useEffect(() => {
+    if (!id) return;
+    fetchQueue(id);
+  }, [id, categoryId]);
+
+  // Update currentIndex when id changes (if not in queue, reset to -1)
   useEffect(() => {
     if (!queue.length) return;
     // Filter out any items without a valid videoId
     const filteredQueue = queue.filter((v) => v.id && v.id.videoId);
     if (filteredQueue.length !== queue.length) setQueue(filteredQueue);
     const idx = filteredQueue.findIndex((v) => v.id.videoId === id);
-    setCurrentIndex(idx >= 0 ? idx : 0);
+    setCurrentIndex(idx); // -1 if not found
   }, [id, queue]);
 
   const setupPlayer = () => {
-    if (!iframeRef.current) return;
-    playerRef.current = new window.YT.Player(iframeRef.current, {
+    setPlayerReady(false);
+    // Clear the player container before creating a new player
+    const container = document.getElementById('youtube-player-container');
+    if (container) {
+      container.innerHTML = '';
+    }
+    if (playerRef.current) {
+      playerRef.current.destroy();
+    }
+    playerRef.current = new window.YT.Player('youtube-player-container', {
+      videoId: videoId,
       events: {
+        onReady: () => setPlayerReady(true),
         onStateChange: (event) => {
+          console.log('YouTube Player onStateChange:', event.data, 'PlayerState.ENDED:', window.YT.PlayerState.ENDED, 'autoplay:', autoplay);
           if (event.data === window.YT.PlayerState.ENDED && autoplay) {
             goToNextVideo();
           }
         },
       },
+      playerVars: {
+        autoplay: 1,
+        enablejsapi: 1,
+        rel: 0,
+        modestbranding: 1,
+        showinfo: 0,
+        iv_load_policy: 3,
+      },
     });
   };
 
   const goToNextVideo = () => {
+    console.log('goToNextVideo called.');
     const filteredQueue = queue.filter((v) => v.id && v.id.videoId);
     if (filteredQueue.length > 0) {
-      if (currentIndex < filteredQueue.length - 1) {
-        const nextId = filteredQueue[currentIndex + 1].id.videoId;
-        if (nextId) router.push(`/watch/${nextId}`);
+      const idx = filteredQueue.findIndex((v) => v.id.videoId === id);
+      if (idx === -1) {
+        // If current video is not in the queue, play the first video in the queue
+        const firstId = filteredQueue[0].id.videoId;
+        if (firstId) {
+          console.log('Auto-next: Navigating to first up next video:', firstId);
+          router.push(`/watch/${firstId}`);
+        }
+      } else if (idx < filteredQueue.length - 1) {
+        const nextId = filteredQueue[idx + 1].id.videoId;
+        if (nextId) {
+          console.log('Auto-next: Navigating to next up next video:', nextId);
+          router.push(`/watch/${nextId}`);
+        }
       } else if (loop && filteredQueue.length > 0) {
         // Loop to first video
         const firstId = filteredQueue[0].id.videoId;
-        if (firstId) router.push(`/watch/${firstId}`);
+        if (firstId) {
+          console.log('Auto-next: Looping to first up next video:', firstId);
+          router.push(`/watch/${firstId}`);
+        }
       }
     }
   };
@@ -111,6 +160,7 @@ export default function WatchPage() {
           publishedAt: item.snippet.publishedAt,
         };
         setVideo(v);
+        setCategoryId(item.snippet.categoryId || item.categoryId || null); // Store categoryId
         localStorage.setItem(localKey, JSON.stringify(v));
         saveToHistory(id, {
           title: item.snippet.title,
@@ -140,11 +190,26 @@ export default function WatchPage() {
   // Fetch a longer queue of related videos
   const fetchQueue = async (vid) => {
     try {
-      const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/search?relatedToVideoId=${vid}&type=video&part=snippet&maxResults=20&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
-      );
-      const data = await res.json();
-      let items = data.items || [];
+      let items = [];
+      if (categoryId) {
+        // Fetch videos from the same category
+        const catRes = await fetch(
+          `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&chart=mostPopular&regionCode=PH&videoCategoryId=${categoryId}&maxResults=20&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
+        );
+        const catData = await catRes.json();
+        items = (catData.items || []).filter((v) => v.id !== vid).map((item) => ({
+          id: { videoId: item.id },
+          snippet: item.snippet,
+        }));
+      }
+      if (!items.length) {
+        // Fallback: relatedToVideoId
+        const res = await fetch(
+          `https://www.googleapis.com/youtube/v3/search?relatedToVideoId=${vid}&type=video&part=snippet&maxResults=20&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
+        );
+        const data = await res.json();
+        items = data.items || [];
+      }
       if (!items.length) {
         // Fallback: fetch random videos from popular categories
         const fallbackCategories = ['music', 'news', 'comedy', 'cartoons', 'vlogs'];
@@ -184,16 +249,7 @@ export default function WatchPage() {
         <div className={minimized ? 'fixed bottom-4 right-4 z-50 w-80 h-44 shadow-2xl rounded-xl overflow-hidden bg-black' : ''} style={minimized ? { maxWidth: '320px', maxHeight: '180px' } : {}}>
           <Card className={minimized ? 'w-full h-full rounded-xl overflow-hidden' : 'w-full shadow-xl rounded-2xl overflow-hidden mb-4'}>
             <CardContent className={minimized ? 'relative w-full h-full p-0' : 'relative aspect-video p-0'}>
-              <iframe
-                ref={iframeRef}
-                width="100%"
-                height="100%"
-                src={videoUrl}
-                title="YouTube video player"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                className="absolute inset-0"
-              ></iframe>
+              <div id="youtube-player-container" className="absolute inset-0 w-full h-full" />
               {/* Minimize/Restore Button */}
               <button
                 onClick={() => setMinimized((m) => !m)}
@@ -296,7 +352,7 @@ export default function WatchPage() {
             }]).map((vid, idx) => (
               <div
                 key={vid.id.videoId}
-                className={`cursor-pointer p-2 rounded flex items-center gap-3 ${idx === currentIndex ? 'bg-blue-100 font-bold' : idx === currentIndex + 1 ? 'bg-gray-100' : 'hover:bg-gray-50'}`}
+                className={`cursor-pointer p-2 rounded flex items-center gap-3 ${vid.id.videoId === id ? 'bg-blue-100 font-bold' : idx === currentIndex + 1 ? 'bg-gray-100' : 'hover:bg-gray-50'}`}
                 onClick={() => router.push(`/watch/${vid.id.videoId}`)}
               >
                 <img
@@ -307,8 +363,8 @@ export default function WatchPage() {
                 <div>
                   <p className="text-sm line-clamp-2">{vid.snippet.title}</p>
                   <p className="text-xs text-gray-500">{vid.snippet.channelTitle}</p>
-                  {idx === currentIndex && <span className="text-xs text-blue-600">Now Playing</span>}
-                  {idx === currentIndex + 1 && <span className="text-xs text-gray-600">Up Next</span>}
+                  {vid.id.videoId === id && <span className="text-xs text-blue-600">Now Playing</span>}
+                  {vid.id.videoId !== id && idx === currentIndex + 1 && <span className="text-xs text-gray-600">Up Next</span>}
                 </div>
               </div>
             ))}
