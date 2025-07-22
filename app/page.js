@@ -2,6 +2,15 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import VideoCard from '@/components/VideoCard';
+import { Button } from '@/components/ui/button';
+
+const CATEGORY_MAP = [
+  { name: 'Music', id: '10' },
+  { name: 'Comedy', id: '23' },
+  { name: 'Anime', id: '1' }, // Animation (closest to Anime)
+  { name: 'Lifestyle', id: '22' }, // People & Blogs (closest to Lifestyle),
+  { name: 'News', id: '25' },
+];
 
 export default function HomePage() {
   const [videos, setVideos] = useState([]);
@@ -10,6 +19,9 @@ export default function HomePage() {
   const [nextPageToken, setNextPageToken] = useState(null);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const loaderRef = useRef();
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [showNoVideos, setShowNoVideos] = useState(false);
+  const [usedFallback, setUsedFallback] = useState(false);
 
   // Always clear search and load trending on mount
   useEffect(() => {
@@ -18,6 +30,28 @@ export default function HomePage() {
     setNextPageToken(null);
     loadTrendingVideos();
   }, []);
+
+  // Delay showing 'No videos found' to avoid flashing on slow loads
+  useEffect(() => {
+    let timeout;
+    if (loading) {
+      setShowNoVideos(false);
+    } else if (!loading && (!Array.isArray(videos) || videos.length === 0)) {
+      timeout = setTimeout(() => setShowNoVideos(true), 2000);
+    } else {
+      setShowNoVideos(false);
+    }
+    return () => clearTimeout(timeout);
+  }, [loading, videos]);
+
+  // Reload trending when category changes (if not searching)
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setVideos([]);
+      setNextPageToken(null);
+      loadTrendingVideos(selectedCategory);
+    }
+  }, [selectedCategory]);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -40,32 +74,50 @@ export default function HomePage() {
     if (!searchQuery.trim()) {
       setVideos([]);
       setNextPageToken(null);
-      loadTrendingVideos();
+      loadTrendingVideos(); // Show trending if search is cleared
       return;
     }
     try {
       setLoading(true);
       const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
       const data = await res.json();
-      setVideos(data);
+      setVideos(Array.isArray(data) ? data : []);
       setNextPageToken(null);
     } catch (err) {
       console.error('Search failed', err);
+      setVideos([]);
     } finally {
       setLoading(false);
     }
   };
 
   // 🔥 Load trending (first page)
-  const loadTrendingVideos = async () => {
+  const loadTrendingVideos = async (categoryId = selectedCategory) => {
     try {
       setLoading(true);
-      const res = await fetch('/api/trending');
+      setUsedFallback(false);
+      let url = '/api/trending';
+      if (categoryId) {
+        url += `?categoryId=${categoryId}`;
+      }
+      const res = await fetch(url);
       const data = await res.json();
-      setVideos(data.items);
-      setNextPageToken(data.nextPageToken);
+      if (Array.isArray(data.items) && data.items.length > 0) {
+        setVideos(data.items);
+        setNextPageToken(data.nextPageToken);
+      } else {
+        // Fallback: fetch random videos using search API
+        const fallbackKeywords = ['music', 'funny', 'news', 'vlog', 'sports', 'movie', 'game', 'dance', 'food', 'travel'];
+        const randomKeyword = fallbackKeywords[Math.floor(Math.random() * fallbackKeywords.length)];
+        const fallbackRes = await fetch(`/api/search?q=${encodeURIComponent(randomKeyword)}`);
+        const fallbackData = await fallbackRes.json();
+        setVideos(Array.isArray(fallbackData) ? fallbackData : []);
+        setNextPageToken(null);
+        setUsedFallback(true);
+      }
     } catch (err) {
       console.error('Failed to load trending videos', err);
+      setVideos([]);
     } finally {
       setLoading(false);
     }
@@ -106,6 +158,19 @@ export default function HomePage() {
             Search
           </button>
         </form>
+        {/* Category Buttons */}
+        <div className="flex flex-wrap justify-center gap-2 mt-4">
+          {CATEGORY_MAP.map((cat) => (
+            <Button
+              key={cat.name}
+              variant={selectedCategory === cat.id ? 'secondary' : 'outline'}
+              onClick={() => setSelectedCategory(cat.id)}
+              className={selectedCategory === cat.id ? 'bg-blue-600 text-white hover:bg-blue-700' : ''}
+            >
+              {cat.name}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {/* 🔥 Title */}
@@ -116,14 +181,20 @@ export default function HomePage() {
 
         {/* 🎥 Videos */}
         {loading ? (
-          <p className="text-center text-gray-500">Loading...</p>
-        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <div key={i} className="animate-pulse bg-gray-200 h-48 rounded-xl" />
+            ))}
+          </div>
+        ) : Array.isArray(videos) && videos.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
             {videos.map((video) => (
               <VideoCard key={video.id} video={video} />
             ))}
           </div>
-        )}
+        ) : showNoVideos && !loading && (!usedFallback || (usedFallback && videos.length === 0)) ? (
+          <p className="text-center text-gray-500">No videos found.</p>
+        ) : null}
 
         {/* Infinite scroll loader */}
         {!searchQuery && nextPageToken && (

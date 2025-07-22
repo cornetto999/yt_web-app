@@ -17,10 +17,9 @@ export default function VideoCard({ video }) {
 
   return (
     <Link
-      href={`/watch/${id}`}
+      href={`/watch/${id}`} // Internal route, not external YouTube
       className="block group rounded-lg overflow-hidden bg-white shadow hover:shadow-md transition"
     >
-      {/* Thumbnail */}
       <div className="relative w-full aspect-video bg-gray-200">
         {thumbnailUrl ? (
           <Image
@@ -37,7 +36,6 @@ export default function VideoCard({ video }) {
           </div>
         )}
 
-        {/* Duration Badge */}
         {duration && (
           <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-0.5 rounded">
             {duration}
@@ -45,7 +43,6 @@ export default function VideoCard({ video }) {
         )}
       </div>
 
-      {/* Video Info */}
       <div className="p-3">
         <h2 className="text-base font-semibold text-gray-900 line-clamp-2">
           {title || 'Untitled Video'}

@@ -13,13 +13,20 @@ export default function WatchPage() {
 
   const [video, setVideo] = useState(null);
   const [comments, setComments] = useState([]);
-  const [related, setRelated] = useState([]);
+  const [queue, setQueue] = useState([]); // Playlist queue
+  const [currentIndex, setCurrentIndex] = useState(0); // Index in queue
   const [loading, setLoading] = useState(true);
+  const [autoplay, setAutoplay] = useState(true);
+  const [loop, setLoop] = useState(false); // Loop playlist state
+  const [minimized, setMinimized] = useState(false); // Mini-player state
   const iframeRef = useRef(null);
   const playerRef = useRef(null);
 
   const localKey = `video-${id}`;
-  const videoUrl = `https://www.youtube.com/embed/${id}?autoplay=1&enablejsapi=1`;
+  const videoId = queue[currentIndex]?.id?.videoId || id;
+  const videoUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&rel=0&modestbranding=1&showinfo=0&iv_load_policy=3`;
+
+
 
   // Load YouTube IFrame API once
   useEffect(() => {
@@ -30,34 +37,37 @@ export default function WatchPage() {
     } else {
       setupPlayer();
     }
-
-    // YouTube API callback
     window.onYouTubeIframeAPIReady = () => {
       setupPlayer();
     };
   }, []);
 
+  // Fetch video details, comments, and related videos (queue)
   useEffect(() => {
     if (!id) return;
-    const cached = localStorage.getItem(localKey);
-    if (cached) {
-      setVideo(JSON.parse(cached));
-      setLoading(false);
-    } else {
-      fetchVideoDetails();
-    }
-
-    fetchComments();
-    fetchRelatedVideos();
+    setLoading(true);
+    fetchVideoDetails(id);
+    fetchComments(id);
+    fetchQueue(id);
+    // eslint-disable-next-line
   }, [id]);
+
+  // Update currentIndex when id changes (if not in queue, reset to 0)
+  useEffect(() => {
+    if (!queue.length) return;
+    // Filter out any items without a valid videoId
+    const filteredQueue = queue.filter((v) => v.id && v.id.videoId);
+    if (filteredQueue.length !== queue.length) setQueue(filteredQueue);
+    const idx = filteredQueue.findIndex((v) => v.id.videoId === id);
+    setCurrentIndex(idx >= 0 ? idx : 0);
+  }, [id, queue]);
 
   const setupPlayer = () => {
     if (!iframeRef.current) return;
-
     playerRef.current = new window.YT.Player(iframeRef.current, {
       events: {
         onStateChange: (event) => {
-          if (event.data === window.YT.PlayerState.ENDED) {
+          if (event.data === window.YT.PlayerState.ENDED && autoplay) {
             goToNextVideo();
           }
         },
@@ -66,9 +76,16 @@ export default function WatchPage() {
   };
 
   const goToNextVideo = () => {
-    if (related.length > 0) {
-      const nextId = related[0].id.videoId;
-      router.push(`/watch/${nextId}`);
+    const filteredQueue = queue.filter((v) => v.id && v.id.videoId);
+    if (filteredQueue.length > 0) {
+      if (currentIndex < filteredQueue.length - 1) {
+        const nextId = filteredQueue[currentIndex + 1].id.videoId;
+        if (nextId) router.push(`/watch/${nextId}`);
+      } else if (loop && filteredQueue.length > 0) {
+        // Loop to first video
+        const firstId = filteredQueue[0].id.videoId;
+        if (firstId) router.push(`/watch/${firstId}`);
+      }
     }
   };
 
@@ -79,10 +96,10 @@ export default function WatchPage() {
     localStorage.setItem('watchHistory', JSON.stringify(updated));
   };
 
-  const fetchVideoDetails = async () => {
+  const fetchVideoDetails = async (vid) => {
     try {
       const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${id}&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
+        `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${vid}&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
       );
       const data = await res.json();
       const item = data.items?.[0];
@@ -108,10 +125,10 @@ export default function WatchPage() {
     }
   };
 
-  const fetchComments = async () => {
+  const fetchComments = async (vid) => {
     try {
       const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId=${id}&maxResults=10&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
+        `https://www.googleapis.com/youtube/v3/commentThreads?part=snippet&videoId=${vid}&maxResults=10&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
       );
       const data = await res.json();
       setComments(data.items || []);
@@ -120,15 +137,36 @@ export default function WatchPage() {
     }
   };
 
-  const fetchRelatedVideos = async () => {
+  // Fetch a longer queue of related videos
+  const fetchQueue = async (vid) => {
     try {
       const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/search?relatedToVideoId=${id}&type=video&part=snippet&maxResults=5&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
+        `https://www.googleapis.com/youtube/v3/search?relatedToVideoId=${vid}&type=video&part=snippet&maxResults=20&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
       );
       const data = await res.json();
-      setRelated(data.items || []);
+      let items = data.items || [];
+      if (!items.length) {
+        // Fallback: fetch random videos from popular categories
+        const fallbackCategories = ['music', 'news', 'comedy', 'cartoons', 'vlogs'];
+        const randomCat = fallbackCategories[Math.floor(Math.random() * fallbackCategories.length)];
+        const fallbackRes = await fetch(
+          `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=10&q=${encodeURIComponent(randomCat)}&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
+        );
+        const fallbackData = await fallbackRes.json();
+        items = fallbackData.items || [];
+      }
+      // Deduplicate by videoId
+      const seen = new Set();
+      const deduped = items.filter((v) => {
+        const vid = v.id && v.id.videoId;
+        if (!vid || seen.has(vid)) return false;
+        seen.add(vid);
+        return true;
+      });
+      setQueue(deduped);
     } catch (err) {
       console.error('Failed to fetch related videos', err);
+      setQueue([]);
     }
   };
 
@@ -143,20 +181,39 @@ export default function WatchPage() {
           </div>
         </div>
         {/* 📺 Video Player */}
-        <Card className="w-full shadow-xl rounded-2xl overflow-hidden mb-4">
-          <CardContent className="relative aspect-video p-0">
-            <iframe
-              ref={iframeRef}
-              width="100%"
-              height="100%"
-              src={videoUrl}
-              title="YouTube video player"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              className="absolute inset-0"
-            ></iframe>
-          </CardContent>
-        </Card>
+        <div className={minimized ? 'fixed bottom-4 right-4 z-50 w-80 h-44 shadow-2xl rounded-xl overflow-hidden bg-black' : ''} style={minimized ? { maxWidth: '320px', maxHeight: '180px' } : {}}>
+          <Card className={minimized ? 'w-full h-full rounded-xl overflow-hidden' : 'w-full shadow-xl rounded-2xl overflow-hidden mb-4'}>
+            <CardContent className={minimized ? 'relative w-full h-full p-0' : 'relative aspect-video p-0'}>
+              <iframe
+                ref={iframeRef}
+                width="100%"
+                height="100%"
+                src={videoUrl}
+                title="YouTube video player"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="absolute inset-0"
+              ></iframe>
+              {/* Minimize/Restore Button */}
+              <button
+                onClick={() => setMinimized((m) => !m)}
+                className={
+                  minimized
+                    ? 'absolute top-2 right-2 bg-white/80 hover:bg-white text-gray-800 rounded-full p-1 shadow'
+                    : 'absolute top-2 right-2 bg-black/60 hover:bg-black text-white rounded-full p-1 shadow'
+                }
+                style={{ zIndex: 10 }}
+                aria-label={minimized ? 'Restore player' : 'Minimize player'}
+              >
+                {minimized ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" /></svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 19H5V5" /></svg>
+                )}
+              </button>
+            </CardContent>
+          </Card>
+        </div>
 
         {/* 📝 Metadata + Subscribe */}
         {!loading && video && (
@@ -203,20 +260,56 @@ export default function WatchPage() {
           </ScrollArea>
         </div>
 
-        {/* 🎞️ Related Videos */}
+        {/* 🎞️ Playlist/Up Next */}
         <div className="bg-white p-4 rounded-xl shadow">
-          <h2 className="text-lg font-semibold mb-3">Up Next</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold">Up Next</h2>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoplay}
+                  onChange={() => setAutoplay((a) => !a)}
+                  className="accent-blue-600"
+                />
+                Autoplay
+              </label>
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={loop}
+                  onChange={() => setLoop((l) => !l)}
+                  className="accent-green-600"
+                />
+                Loop playlist
+              </label>
+            </div>
+          </div>
           <div className="space-y-3">
-            {related.map((vid) => (
+            {(queue.length > 0 ? queue : [{
+              id: { videoId: id },
+              snippet: {
+                title: video?.title || 'Current Video',
+                channelTitle: video?.channelTitle || '',
+                thumbnails: { default: { url: `https://i.ytimg.com/vi/${id}/default.jpg` } },
+              },
+            }]).map((vid, idx) => (
               <div
                 key={vid.id.videoId}
-                className="cursor-pointer hover:bg-gray-50 p-2 rounded"
+                className={`cursor-pointer p-2 rounded flex items-center gap-3 ${idx === currentIndex ? 'bg-blue-100 font-bold' : idx === currentIndex + 1 ? 'bg-gray-100' : 'hover:bg-gray-50'}`}
                 onClick={() => router.push(`/watch/${vid.id.videoId}`)}
               >
-                <p className="text-sm font-medium">{vid.snippet.title}</p>
-                <p className="text-xs text-gray-500">
-                  {vid.snippet.channelTitle}
-                </p>
+                <img
+                  src={vid.snippet.thumbnails?.default?.url}
+                  alt={vid.snippet.title}
+                  className="w-16 h-10 object-cover rounded"
+                />
+                <div>
+                  <p className="text-sm line-clamp-2">{vid.snippet.title}</p>
+                  <p className="text-xs text-gray-500">{vid.snippet.channelTitle}</p>
+                  {idx === currentIndex && <span className="text-xs text-blue-600">Now Playing</span>}
+                  {idx === currentIndex + 1 && <span className="text-xs text-gray-600">Up Next</span>}
+                </div>
               </div>
             ))}
           </div>
