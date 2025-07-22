@@ -238,6 +238,26 @@ export default function WatchPage() {
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       <div className="max-w-4xl mx-auto">
+        {/* 🔙 Back Button */}
+        <button
+          onClick={() => {
+            if (typeof window !== 'undefined' && window.history.length > 1) {
+              router.back();
+            } else {
+              const lastSearch = typeof window !== 'undefined' ? localStorage.getItem('lastSearchQuery') : '';
+              if (lastSearch) {
+                router.push(`/?q=${encodeURIComponent(lastSearch)}`);
+              } else {
+                router.push('/');
+              }
+            }
+          }}
+          className="mb-4 flex items-center gap-2 text-blue-600 hover:text-blue-800 font-medium"
+          aria-label="Back"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          Back
+        </button>
         {/* 📱 PiP Info Banner (mobile only) */}
         <div className="block sm:hidden mb-2">
           <div className="bg-blue-100 text-blue-800 text-sm rounded px-3 py-2 flex items-center gap-2">

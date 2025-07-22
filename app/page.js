@@ -3,6 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import VideoCard from '@/components/VideoCard';
 import { Button } from '@/components/ui/button';
+import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
 
 const CATEGORY_MAP = [
   { name: 'Music', id: '10' },
@@ -22,26 +24,31 @@ export default function HomePage() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [showNoVideos, setShowNoVideos] = useState(false);
   const [usedFallback, setUsedFallback] = useState(false);
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const router = typeof window !== 'undefined' ? { push: (url) => window.history.pushState({}, '', url) } : null;
 
   // Always clear search and load trending on mount
   useEffect(() => {
-    setSearchQuery('');
-    setVideos([]);
-    setNextPageToken(null);
-    loadTrendingVideos();
+    // If there is a ?q= param, use it as the initial search query
+    const q = searchParams ? searchParams.get('q') : '';
+    if (q) {
+      setSearchQuery(q);
+      handleSearch({ preventDefault: () => { } }, q);
+    } else {
+      setSearchQuery('');
+      setVideos([]);
+      setNextPageToken(null);
+      loadTrendingVideos();
+    }
   }, []);
 
-  // Delay showing 'No videos found' to avoid flashing on slow loads
+  // Only show 'No videos found' if loading is false and videos are empty
   useEffect(() => {
-    let timeout;
-    if (loading) {
-      setShowNoVideos(false);
-    } else if (!loading && (!Array.isArray(videos) || videos.length === 0)) {
-      timeout = setTimeout(() => setShowNoVideos(true), 2000);
+    if (!loading && (!Array.isArray(videos) || videos.length === 0)) {
+      setShowNoVideos(true);
     } else {
       setShowNoVideos(false);
     }
-    return () => clearTimeout(timeout);
   }, [loading, videos]);
 
   // Reload trending when category changes (if not searching)
@@ -69,9 +76,10 @@ export default function HomePage() {
   }, [nextPageToken, isFetchingMore, searchQuery]);
 
   // 🔍 Search or reset
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) {
+  const handleSearch = async (e, overrideQuery) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const query = overrideQuery !== undefined ? overrideQuery : searchQuery;
+    if (!query.trim()) {
       setVideos([]);
       setNextPageToken(null);
       loadTrendingVideos(); // Show trending if search is cleared
@@ -79,10 +87,13 @@ export default function HomePage() {
     }
     try {
       setLoading(true);
-      const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+      localStorage.setItem('lastSearchQuery', query);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
       const data = await res.json();
       setVideos(Array.isArray(data) ? data : []);
       setNextPageToken(null);
+      // Optionally update the URL
+      if (router) router.push(`/?q=${encodeURIComponent(query)}`);
     } catch (err) {
       console.error('Search failed', err);
       setVideos([]);
@@ -160,6 +171,20 @@ export default function HomePage() {
         </form>
         {/* Category Buttons */}
         <div className="flex flex-wrap justify-center gap-2 mt-4">
+          <Button
+            key="home"
+            variant={selectedCategory === '' ? 'secondary' : 'outline'}
+            onClick={() => {
+              setSearchQuery('');
+              setSelectedCategory('');
+              setVideos([]);
+              setNextPageToken(null);
+              loadTrendingVideos();
+            }}
+            className={selectedCategory === '' ? 'bg-blue-600 text-white hover:bg-blue-700' : ''}
+          >
+            Home
+          </Button>
           {CATEGORY_MAP.map((cat) => (
             <Button
               key={cat.name}
@@ -180,7 +205,7 @@ export default function HomePage() {
         </h1>
 
         {/* 🎥 Videos */}
-        {loading ? (
+        {loading || (!Array.isArray(videos) || videos.length === 0) && !showNoVideos ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
             {Array.from({ length: 9 }).map((_, i) => (
               <div key={i} className="animate-pulse bg-gray-200 h-48 rounded-xl" />
