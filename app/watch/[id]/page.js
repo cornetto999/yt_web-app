@@ -22,6 +22,73 @@ export default function WatchPage() {
   const [categoryId, setCategoryId] = useState(null); // Store categoryId for related videos
   const playerRef = useRef(null);
   const [playerReady, setPlayerReady] = useState(false); // Track if player is ready
+  const autoplayRef = useRef(autoplay); // Use ref to track autoplay state
+  const [lastPlayerState, setLastPlayerState] = useState(null); // Track last player state
+  const checkIntervalRef = useRef(null); // Ref for interval
+  const [searchQuery, setSearchQuery] = useState(''); // Search query for watch page
+  const [searchResults, setSearchResults] = useState([]); // Search results
+  const [showSearchResults, setShowSearchResults] = useState(false); // Show search results
+
+  // Update autoplay ref whenever autoplay state changes
+  useEffect(() => {
+    autoplayRef.current = autoplay;
+  }, [autoplay]);
+
+  // Handle user interaction to enable autoplay
+  useEffect(() => {
+    const handleUserInteraction = () => {
+      if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
+        try {
+          playerRef.current.playVideo();
+        } catch (err) {
+          // Silently handle errors
+        }
+      }
+    };
+
+    // Add event listeners for user interaction
+    document.addEventListener('click', handleUserInteraction, { once: true });
+    document.addEventListener('keydown', handleUserInteraction, { once: true });
+    document.addEventListener('touchstart', handleUserInteraction, { once: true });
+
+    return () => {
+      document.removeEventListener('click', handleUserInteraction);
+      document.removeEventListener('keydown', handleUserInteraction);
+      document.removeEventListener('touchstart', handleUserInteraction);
+    };
+  }, []);
+
+  // Periodic check for player state as backup
+  useEffect(() => {
+    if (playerReady && playerRef.current) {
+      checkIntervalRef.current = setInterval(() => {
+        if (playerRef.current && typeof playerRef.current.getPlayerState === 'function') {
+          try {
+            const currentState = playerRef.current.getPlayerState();
+            if (currentState !== lastPlayerState) {
+              setLastPlayerState(currentState);
+
+              // Check if video ended
+              if (currentState === window.YT.PlayerState.ENDED && autoplayRef.current) {
+                setTimeout(() => {
+                  goToNextVideo();
+                }, 1000);
+              }
+            }
+          } catch (err) {
+            // Silently handle errors
+          }
+        }
+      }, 2000); // Check every 2 seconds
+    }
+
+    return () => {
+      if (checkIntervalRef.current) {
+        clearInterval(checkIntervalRef.current);
+        checkIntervalRef.current = null;
+      }
+    };
+  }, [playerReady, lastPlayerState]);
 
   const localKey = `video-${id}`;
   // Always use the id from the URL for the main video player
@@ -49,6 +116,24 @@ export default function WatchPage() {
   useEffect(() => {
     if (playerReady && playerRef.current && typeof playerRef.current.loadVideoById === 'function') {
       playerRef.current.loadVideoById(videoId);
+      // Ensure the new video starts playing with multiple attempts
+      const playVideo = () => {
+        if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
+          try {
+            playerRef.current.playVideo();
+          } catch (err) {
+            console.log('Play video failed, retrying...');
+            setTimeout(playVideo, 1000);
+          }
+        }
+      };
+
+      // Try to play immediately
+      setTimeout(playVideo, 500);
+      // Backup attempt after 2 seconds
+      setTimeout(playVideo, 2000);
+      // Final attempt after 4 seconds
+      setTimeout(playVideo, 4000);
     }
     // eslint-disable-next-line
   }, [videoId, playerReady]);
@@ -87,16 +172,41 @@ export default function WatchPage() {
     if (playerRef.current) {
       playerRef.current.destroy();
     }
+
     playerRef.current = new window.YT.Player('youtube-player-container', {
       videoId: videoId,
       events: {
-        onReady: () => setPlayerReady(true),
+        onReady: () => {
+          setPlayerReady(true);
+          // Ensure video starts playing with multiple attempts
+          const playVideo = () => {
+            if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
+              try {
+                playerRef.current.playVideo();
+              } catch (err) {
+                console.log('Play video failed, retrying...');
+                setTimeout(playVideo, 1000);
+              }
+            }
+          };
+
+          // Try to play immediately
+          setTimeout(playVideo, 500);
+          // Backup attempt after 2 seconds
+          setTimeout(playVideo, 2000);
+        },
         onStateChange: (event) => {
-          console.log('YouTube Player onStateChange:', event.data, 'PlayerState.ENDED:', window.YT.PlayerState.ENDED, 'autoplay:', autoplay);
-          if (event.data === window.YT.PlayerState.ENDED && autoplay) {
-            goToNextVideo();
+          // Check if video ended and autoplay is enabled
+          if (event.data === window.YT.PlayerState.ENDED && autoplayRef.current) {
+            // Add a small delay to ensure the player state is fully updated
+            setTimeout(() => {
+              goToNextVideo();
+            }, 1000);
           }
         },
+        onError: (event) => {
+          console.error('YouTube Player error:', event.data);
+        }
       },
       playerVars: {
         autoplay: 1,
@@ -105,36 +215,66 @@ export default function WatchPage() {
         modestbranding: 1,
         showinfo: 0,
         iv_load_policy: 3,
+        start: 0,
+        playsinline: 1,
+        mute: 0,
+        controls: 1,
+        fs: 1,
+        cc_load_policy: 0,
+        disablekb: 0,
       },
     });
   };
 
   const goToNextVideo = () => {
-    console.log('goToNextVideo called.');
     const filteredQueue = queue.filter((v) => v.id && v.id.videoId);
+
     if (filteredQueue.length > 0) {
       const idx = filteredQueue.findIndex((v) => v.id.videoId === id);
+
       if (idx === -1) {
         // If current video is not in the queue, play the first video in the queue
         const firstId = filteredQueue[0].id.videoId;
         if (firstId) {
-          console.log('Auto-next: Navigating to first up next video:', firstId);
           router.push(`/watch/${firstId}`);
         }
       } else if (idx < filteredQueue.length - 1) {
+        // There's a next video in the queue
         const nextId = filteredQueue[idx + 1].id.videoId;
         if (nextId) {
-          console.log('Auto-next: Navigating to next up next video:', nextId);
           router.push(`/watch/${nextId}`);
         }
-      } else if (loop && filteredQueue.length > 0) {
-        // Loop to first video
-        const firstId = filteredQueue[0].id.videoId;
-        if (firstId) {
-          console.log('Auto-next: Looping to first up next video:', firstId);
-          router.push(`/watch/${firstId}`);
+      } else if (loop && filteredQueue.length > 1) {
+        // Loop to second video (skip the current one at index 0)
+        const nextId = filteredQueue[1].id.videoId;
+        if (nextId) {
+          router.push(`/watch/${nextId}`);
         }
       }
+    }
+  };
+
+  // Search functionality
+  const handleSearch = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!searchQuery.trim()) {
+      setShowSearchResults(false);
+      return;
+    }
+
+    // Auto-minimize video player when searching
+    if (!minimized) {
+      setMinimized(true);
+    }
+
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+      const data = await res.json();
+      setSearchResults(Array.isArray(data) ? data : []);
+      setShowSearchResults(true);
+    } catch (err) {
+      console.error('Search failed', err);
+      setSearchResults([]);
     }
   };
 
@@ -191,6 +331,7 @@ export default function WatchPage() {
   const fetchQueue = async (vid) => {
     try {
       let items = [];
+
       if (categoryId) {
         // Fetch videos from the same category
         const catRes = await fetch(
@@ -202,24 +343,35 @@ export default function WatchPage() {
           snippet: item.snippet,
         }));
       }
+
       if (!items.length) {
-        // Fallback: relatedToVideoId
-        const res = await fetch(
-          `https://www.googleapis.com/youtube/v3/search?relatedToVideoId=${vid}&type=video&part=snippet&maxResults=20&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
-        );
-        const data = await res.json();
-        items = data.items || [];
+        // Fallback: Search for videos with similar title/keywords
+        try {
+          const res = await fetch(
+            `https://www.googleapis.com/youtube/v3/search?q=${encodeURIComponent(video?.title || 'music')}&type=video&part=snippet&maxResults=20&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
+          );
+          const data = await res.json();
+          items = (data.items || []).filter((v) => v.id.videoId !== vid);
+        } catch (err) {
+          // Silently handle search fallback errors
+        }
       }
+
       if (!items.length) {
         // Fallback: fetch random videos from popular categories
-        const fallbackCategories = ['music', 'news', 'comedy', 'cartoons', 'vlogs'];
-        const randomCat = fallbackCategories[Math.floor(Math.random() * fallbackCategories.length)];
-        const fallbackRes = await fetch(
-          `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=10&q=${encodeURIComponent(randomCat)}&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
-        );
-        const fallbackData = await fallbackRes.json();
-        items = fallbackData.items || [];
+        try {
+          const fallbackCategories = ['music', 'news', 'comedy', 'cartoons', 'vlogs'];
+          const randomCat = fallbackCategories[Math.floor(Math.random() * fallbackCategories.length)];
+          const fallbackRes = await fetch(
+            `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=10&q=${encodeURIComponent(randomCat)}&key=${process.env.NEXT_PUBLIC_YOUTUBE_API_KEY}`
+          );
+          const fallbackData = await fallbackRes.json();
+          items = (fallbackData.items || []).filter((v) => v.id.videoId !== vid);
+        } catch (err) {
+          // Silently handle fallback search errors
+        }
       }
+
       // Deduplicate by videoId
       const seen = new Set();
       const deduped = items.filter((v) => {
@@ -228,42 +380,134 @@ export default function WatchPage() {
         seen.add(vid);
         return true;
       });
+
+      // Always add the current video to the beginning of the queue
+      const currentVideoInQueue = deduped.find(v => v.id.videoId === vid);
+      if (!currentVideoInQueue) {
+        deduped.unshift({
+          id: { videoId: vid },
+          snippet: {
+            title: video?.title || 'Current Video',
+            channelTitle: video?.channelTitle || 'Unknown Channel',
+            thumbnails: {
+              default: { url: `https://i.ytimg.com/vi/${vid}/default.jpg` },
+              medium: { url: `https://i.ytimg.com/vi/${vid}/mqdefault.jpg` },
+              high: { url: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` }
+            },
+          },
+        });
+      }
+
+      // If we still don't have any videos, add some default popular videos as fallback
+      if (deduped.length === 0) {
+        // Add some popular video IDs as fallback
+        const fallbackVideoIds = [
+          'dQw4w9WgXcQ', // Rick Roll (very popular)
+          'kJQP7kiw5Fk', // Despacito
+          '9bZkp7q19f0', // PSY - GANGNAM STYLE
+          'YQHsXMglC9A', // Hello - Adele
+          'fJ9rUzIMcZQ', // Queen - Bohemian Rhapsody
+        ];
+
+        fallbackVideoIds.forEach((fallbackId, index) => {
+          if (fallbackId !== vid) {
+            deduped.push({
+              id: { videoId: fallbackId },
+              snippet: {
+                title: `Fallback Video ${index + 1}`,
+                channelTitle: 'Popular Videos',
+                thumbnails: { default: { url: `https://i.ytimg.com/vi/${fallbackId}/default.jpg` } },
+              },
+            });
+          }
+        });
+
+        // Always add the current video as well
+        deduped.unshift({
+          id: { videoId: vid },
+          snippet: {
+            title: video?.title || 'Current Video',
+            channelTitle: video?.channelTitle || 'Unknown Channel',
+            thumbnails: { default: { url: `https://i.ytimg.com/vi/${vid}/default.jpg` } },
+          },
+        });
+      }
+
       setQueue(deduped);
     } catch (err) {
       console.error('Failed to fetch related videos', err);
-      setQueue([]);
+      // Even on error, add some fallback videos
+      const fallbackVideoIds = [
+        'dQw4w9WgXcQ', // Rick Roll
+        'kJQP7kiw5Fk', // Despacito
+        '9bZkp7q19f0', // PSY - GANGNAM STYLE
+        'YQHsXMglC9A', // Hello - Adele
+        'fJ9rUzIMcZQ', // Queen - Bohemian Rhapsody
+      ];
+
+      const fallbackQueue = fallbackVideoIds.map((fallbackId, index) => ({
+        id: { videoId: fallbackId },
+        snippet: {
+          title: `Fallback Video ${index + 1}`,
+          channelTitle: 'Popular Videos',
+          thumbnails: { default: { url: `https://i.ytimg.com/vi/${fallbackId}/default.jpg` } },
+        },
+      }));
+
+      // Add current video to the beginning
+      fallbackQueue.unshift({
+        id: { videoId: vid },
+        snippet: {
+          title: video?.title || 'Current Video',
+          channelTitle: video?.channelTitle || 'Unknown Channel',
+          thumbnails: { default: { url: `https://i.ytimg.com/vi/${vid}/default.jpg` } },
+        },
+      });
+
+      setQueue(fallbackQueue);
     }
   };
 
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       <div className="max-w-4xl mx-auto">
-        {/* 🔙 Back Button */}
-        <button
-          onClick={() => {
-            if (typeof window !== 'undefined' && window.history.length > 1) {
-              router.back();
-            } else {
-              const lastSearch = typeof window !== 'undefined' ? localStorage.getItem('lastSearchQuery') : '';
-              if (lastSearch) {
-                router.push(`/?q=${encodeURIComponent(lastSearch)}`);
+        {/* 🔙 Back Button & 🔍 Search Bar */}
+        <div className="mb-6 flex items-center gap-4">
+          <button
+            onClick={() => {
+              if (typeof window !== 'undefined' && window.history.length > 1) {
+                router.back();
               } else {
-                router.push('/');
+                const lastSearch = typeof window !== 'undefined' ? localStorage.getItem('lastSearchQuery') : '';
+                if (lastSearch) {
+                  router.push(`/?q=${encodeURIComponent(lastSearch)}`);
+                } else {
+                  router.push('/');
+                }
               }
-            }
-          }}
-          className="mb-4 flex items-center gap-2 text-blue-600 hover:text-blue-800 font-medium"
-          aria-label="Back"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-          Back
-        </button>
-        {/* 📱 PiP Info Banner (mobile only) */}
-        <div className="block sm:hidden mb-2">
-          <div className="bg-blue-100 text-blue-800 text-sm rounded px-3 py-2 flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12.37V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2h7.37M17 17h4v4h-4v-4z" /></svg>
-            <span>Tip: Tap the PiP icon in the YouTube player to watch in Picture-in-Picture mode.</span>
-          </div>
+            }}
+            className="flex items-center gap-2 text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
+            aria-label="Back"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+            Back
+          </button>
+
+          <form onSubmit={handleSearch} className="flex gap-2 flex-1">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search videos..."
+              className="flex-1 px-4 py-2 rounded-l border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              type="submit"
+              className="px-6 py-2 bg-blue-600 text-white rounded-r border border-blue-600 hover:bg-blue-700 transition"
+            >
+              Search
+            </button>
+          </form>
         </div>
         {/* 📺 Video Player */}
         <div className={minimized ? 'fixed bottom-4 right-4 z-50 w-80 h-44 shadow-2xl rounded-xl overflow-hidden bg-black' : ''} style={minimized ? { maxWidth: '320px', maxHeight: '180px' } : {}}>
@@ -290,6 +534,62 @@ export default function WatchPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* 🔍 Search Results */}
+        {showSearchResults && searchResults.length > 0 && (
+          <div className="bg-white p-4 rounded-xl shadow mb-6">
+            <h2 className="text-lg font-semibold mb-3">Search Results</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {searchResults.slice(0, 6).map((result, idx) => (
+                <div
+                  key={String(result.id?.videoId || result.id || result.title || idx)}
+                  onClick={() => {
+                    const videoId = result.id?.videoId || result.id;
+                    if (videoId) {
+                      // Restore video player when selecting a new video
+                      setMinimized(false);
+                      setShowSearchResults(false);
+                      router.push(`/watch/${videoId}`);
+                    }
+                  }}
+                  className="cursor-pointer group rounded-lg overflow-hidden bg-gray-50 hover:bg-gray-100 transition"
+                >
+                  <div className="relative w-full aspect-video bg-gray-200">
+                    {result.snippet?.thumbnails?.default?.url ? (
+                      <img
+                        src={result.snippet.thumbnails.default.url}
+                        alt={result.snippet.title}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 bg-gray-300 flex items-center justify-center text-gray-500 text-sm">
+                        No Image
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-3">
+                    <h3 className="text-sm font-medium text-gray-900 line-clamp-2">
+                      {result.snippet?.title || 'Untitled Video'}
+                    </h3>
+                    <p className="text-xs text-gray-600 mt-1">
+                      {result.snippet?.channelTitle || 'Unknown Channel'}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => {
+                setShowSearchResults(false);
+                // Restore video player when hiding search results
+                setMinimized(false);
+              }}
+              className="mt-3 text-sm text-blue-600 hover:text-blue-800"
+            >
+              Hide Search Results
+            </button>
+          </div>
+        )}
 
         {/* 📝 Metadata + Subscribe */}
         {!loading && video && (
@@ -336,58 +636,129 @@ export default function WatchPage() {
           </ScrollArea>
         </div>
 
-        {/* 🎞️ Playlist/Up Next */}
-        <div className="bg-white p-4 rounded-xl shadow">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Up Next</h2>
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={autoplay}
-                  onChange={() => setAutoplay((a) => !a)}
-                  className="accent-blue-600"
-                />
-                Autoplay
-              </label>
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={loop}
-                  onChange={() => setLoop((l) => !l)}
-                  className="accent-green-600"
-                />
-                Loop playlist
-              </label>
+        {/* 🎞️ Up Next - YouTube Style */}
+        <div className="bg-white rounded-xl shadow">
+          <div className="p-4 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Up Next</h2>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoplay}
+                    onChange={() => setAutoplay((a) => !a)}
+                    className="accent-blue-600"
+                  />
+                  Autoplay
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={loop}
+                    onChange={() => setLoop((l) => !l)}
+                    className="accent-green-600"
+                  />
+                  Loop playlist
+                </label>
+              </div>
             </div>
           </div>
-          <div className="space-y-3">
-            {(queue.length > 0 ? queue : [{
-              id: { videoId: id },
-              snippet: {
-                title: video?.title || 'Current Video',
-                channelTitle: video?.channelTitle || '',
-                thumbnails: { default: { url: `https://i.ytimg.com/vi/${id}/default.jpg` } },
-              },
-            }]).map((vid, idx) => (
-              <div
-                key={vid.id.videoId}
-                className={`cursor-pointer p-2 rounded flex items-center gap-3 ${vid.id.videoId === id ? 'bg-blue-100 font-bold' : idx === currentIndex + 1 ? 'bg-gray-100' : 'hover:bg-gray-50'}`}
-                onClick={() => router.push(`/watch/${vid.id.videoId}`)}
-              >
-                <img
-                  src={vid.snippet.thumbnails?.default?.url}
-                  alt={vid.snippet.title}
-                  className="w-16 h-10 object-cover rounded"
-                />
-                <div>
-                  <p className="text-sm line-clamp-2">{vid.snippet.title}</p>
-                  <p className="text-xs text-gray-500">{vid.snippet.channelTitle}</p>
-                  {vid.id.videoId === id && <span className="text-xs text-blue-600">Now Playing</span>}
-                  {vid.id.videoId !== id && idx === currentIndex + 1 && <span className="text-xs text-gray-600">Up Next</span>}
+
+          <div className="p-4">
+            <div className="space-y-3">
+              {(queue.length > 0 ? queue : [{
+                id: { videoId: id },
+                snippet: {
+                  title: video?.title || 'Current Video',
+                  channelTitle: video?.channelTitle || 'Unknown Channel',
+                  thumbnails: {
+                    default: { url: `https://i.ytimg.com/vi/${id}/default.jpg` },
+                    medium: { url: `https://i.ytimg.com/vi/${id}/mqdefault.jpg` },
+                    high: { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg` }
+                  },
+                },
+              }]).map((vid, idx) => (
+                <div
+                  key={vid.id.videoId}
+                  className={`group cursor-pointer flex gap-3 p-2 rounded-lg transition-colors ${vid.id.videoId === id
+                    ? 'bg-blue-50 border-l-4 border-blue-500'
+                    : 'hover:bg-gray-50'
+                    }`}
+                  onClick={() => {
+                    // Ensure autoplay when clicking on videos
+                    if (vid.id.videoId !== id) {
+                      // Store autoplay preference for the new video
+                      localStorage.setItem('autoplayEnabled', 'true');
+                      router.push(`/watch/${vid.id.videoId}`);
+                    }
+                  }}
+                >
+                  {/* Thumbnail */}
+                  <div className="relative flex-shrink-0">
+                    <img
+                      src={vid.snippet.thumbnails?.high?.url || vid.snippet.thumbnails?.medium?.url || vid.snippet.thumbnails?.default?.url || `https://i.ytimg.com/vi/${vid.id.videoId}/hqdefault.jpg`}
+                      alt={vid.snippet.title}
+                      className="w-40 h-24 object-cover rounded-lg"
+                      onError={(e) => {
+                        // Fallback to default thumbnail if image fails to load
+                        e.target.src = `https://i.ytimg.com/vi/${vid.id.videoId}/default.jpg`;
+                      }}
+                    />
+                    {vid.id.videoId === id && (
+                      <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-lg">
+                        <div className="bg-red-600 text-white px-2 py-1 rounded text-xs font-medium">
+                          NOW PLAYING
+                        </div>
+                      </div>
+                    )}
+                    {vid.id.videoId !== id && idx === currentIndex + 1 && (
+                      <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center rounded-lg">
+                        <div className="bg-white text-gray-800 px-2 py-1 rounded text-xs font-medium">
+                          UP NEXT
+                        </div>
+                      </div>
+                    )}
+                    {/* Play button overlay for non-current videos */}
+                    {vid.id.videoId !== id && (
+                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 flex items-center justify-center rounded-lg transition-all">
+                        <div className="w-8 h-8 bg-white bg-opacity-0 group-hover:bg-opacity-90 rounded-full flex items-center justify-center transition-all">
+                          <svg className="w-4 h-4 text-gray-800 opacity-0 group-hover:opacity-100" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Video Info */}
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-medium text-gray-900 line-clamp-2 group-hover:text-blue-600 transition-colors">
+                      {vid.snippet.title}
+                    </h3>
+                    <p className="text-xs text-gray-600 mt-1">
+                      {vid.snippet.channelTitle}
+                    </p>
+                    {vid.snippet.publishedAt && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        {formatTimeAgo(vid.snippet.publishedAt)}
+                      </p>
+                    )}
+                    {vid.id.videoId === id && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <div className="w-2 h-2 bg-red-600 rounded-full"></div>
+                        <span className="text-xs text-red-600 font-medium">Now Playing</span>
+                      </div>
+                    )}
+                    {vid.id.videoId !== id && idx === currentIndex + 1 && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                        <span className="text-xs text-gray-600 font-medium">Up Next</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       </div>

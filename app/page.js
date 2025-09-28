@@ -42,13 +42,17 @@ export default function HomePage() {
     }
   }, []);
 
-  // Only show 'No videos found' if loading is false and videos are empty
+  // Delay showing 'No videos found' to avoid flashing on slow loads
   useEffect(() => {
-    if (!loading && (!Array.isArray(videos) || videos.length === 0)) {
-      setShowNoVideos(true);
+    let timeout;
+    if (loading) {
+      setShowNoVideos(false);
+    } else if (!loading && (!Array.isArray(videos) || videos.length === 0)) {
+      timeout = setTimeout(() => setShowNoVideos(true), 10000); // 10 seconds for poor network
     } else {
       setShowNoVideos(false);
     }
+    return () => clearTimeout(timeout);
   }, [loading, videos]);
 
   // Reload trending when category changes (if not searching)
