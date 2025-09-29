@@ -2,16 +2,17 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import VideoCard from '@/components/VideoCard';
+import ShortCard from '@/components/ShortCard';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
 const CATEGORY_MAP = [
-  { name: 'Music', id: '10' },
-  { name: 'Comedy', id: '23' },
-  { name: 'Anime', id: '1' }, // Animation (closest to Anime)
-  { name: 'Lifestyle', id: '22' }, // People & Blogs (closest to Lifestyle),
-  { name: 'News', id: '25' },
+  { name: 'Music', id: '10' }, // YouTube categoryId 10
+  { name: 'Comedy', id: '23' }, // YouTube categoryId 23
+  { name: 'Animation', id: '1' }, // YouTube categoryId 1 (Animation)
+  { name: 'People & Blogs', id: '22' }, // YouTube categoryId 22
+  { name: 'News & Politics', id: '25' }, // YouTube categoryId 25
 ];
 
 export default function HomePage() {
@@ -24,13 +25,29 @@ export default function HomePage() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [showNoVideos, setShowNoVideos] = useState(false);
   const [usedFallback, setUsedFallback] = useState(false);
+  const [feedType, setFeedType] = useState('trending'); // 'trending' | 'shorts'
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const router = typeof window !== 'undefined' ? { push: (url) => window.history.pushState({}, '', url) } : null;
 
-  // Always clear search and load trending on mount
+  // Restore from session if available; else load initial
   useEffect(() => {
-    // If there is a ?q= param, use it as the initial search query
     const q = searchParams ? searchParams.get('q') : '';
+    const saved = sessionStorage.getItem('homeState');
+    if (!q && saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setSearchQuery(parsed.searchQuery || '');
+        setSelectedCategory(parsed.selectedCategory || '');
+        setFeedType(parsed.feedType || 'trending');
+        setVideos(Array.isArray(parsed.videos) ? parsed.videos : []);
+        setNextPageToken(parsed.nextPageToken || null);
+        // Restore scroll after a tick
+        setTimeout(() => {
+          window.scrollTo(0, parsed.scrollY || 0);
+        }, 0);
+        return;
+      } catch { }
+    }
     if (q) {
       setSearchQuery(q);
       handleSearch({ preventDefault: () => { } }, q);
@@ -55,14 +72,16 @@ export default function HomePage() {
     return () => clearTimeout(timeout);
   }, [loading, videos]);
 
-  // Reload trending when category changes (if not searching)
+  // Reload trending for the selected category only (no shuffling)
   useEffect(() => {
     if (!searchQuery.trim()) {
       setVideos([]);
       setNextPageToken(null);
-      loadTrendingVideos(selectedCategory);
+      if (feedType === 'trending') {
+        loadTrendingVideos(selectedCategory);
+      }
     }
-  }, [selectedCategory]);
+  }, [selectedCategory, feedType]);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -70,14 +89,18 @@ export default function HomePage() {
     const observer = new window.IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && !isFetchingMore) {
-          fetchMoreTrendingVideos();
+          if (feedType === 'shorts') {
+            fetchMoreShortsVideos();
+          } else {
+            fetchMoreTrendingVideos();
+          }
         }
       },
       { threshold: 1 }
     );
     observer.observe(loaderRef.current);
     return () => observer.disconnect();
-  }, [nextPageToken, isFetchingMore, searchQuery]);
+  }, [nextPageToken, isFetchingMore, searchQuery, feedType]);
 
   // 🔍 Search or reset
   const handleSearch = async (e, overrideQuery) => {
@@ -91,6 +114,8 @@ export default function HomePage() {
     }
     try {
       setLoading(true);
+      // Ensure search always uses standard video layout
+      setFeedType('trending');
       localStorage.setItem('lastSearchQuery', query);
       const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
       const data = await res.json();
@@ -138,12 +163,34 @@ export default function HomePage() {
     }
   };
 
+  // 🎯 Load shorts (first page)
+  const loadShortsVideos = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/shorts');
+      const data = await res.json();
+      if (!res.ok) {
+        console.error('Shorts API error', data?.error);
+      }
+      setVideos(Array.isArray(data.items) ? data.items : []);
+      setNextPageToken(data.nextPageToken || null);
+    } catch (err) {
+      console.error('Failed to load shorts', err);
+      setVideos([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // 🔥 Fetch more trending (pagination)
   const fetchMoreTrendingVideos = useCallback(async () => {
     if (!nextPageToken) return;
     setIsFetchingMore(true);
     try {
-      const res = await fetch(`/api/trending?pageToken=${nextPageToken}`);
+      const params = new URLSearchParams();
+      params.set('pageToken', nextPageToken);
+      if (selectedCategory) params.set('categoryId', selectedCategory);
+      const res = await fetch(`/api/trending?${params.toString()}`);
       const data = await res.json();
       setVideos((prev) => [...prev, ...data.items]);
       setNextPageToken(data.nextPageToken);
@@ -152,7 +199,38 @@ export default function HomePage() {
     } finally {
       setIsFetchingMore(false);
     }
+  }, [nextPageToken, selectedCategory]);
+
+  // 🎯 Fetch more shorts (pagination)
+  const fetchMoreShortsVideos = useCallback(async () => {
+    if (!nextPageToken) return;
+    setIsFetchingMore(true);
+    try {
+      const res = await fetch(`/api/shorts?pageToken=${nextPageToken}`);
+      const data = await res.json();
+      setVideos((prev) => [...prev, ...(data.items || [])]);
+      setNextPageToken(data.nextPageToken || null);
+    } catch (err) {
+      console.error('Failed to fetch more shorts', err);
+    } finally {
+      setIsFetchingMore(false);
+    }
   }, [nextPageToken]);
+
+  // 🧭 Save state before navigating away
+  const saveHomeState = useCallback(() => {
+    const state = {
+      searchQuery,
+      selectedCategory,
+      feedType,
+      videos,
+      nextPageToken,
+      scrollY: window.scrollY,
+    };
+    try {
+      sessionStorage.setItem('homeState', JSON.stringify(state));
+    } catch { }
+  }, [searchQuery, selectedCategory, feedType, videos, nextPageToken]);
 
   return (
     <main className="min-h-screen bg-gray-100">
@@ -177,24 +255,47 @@ export default function HomePage() {
         <div className="flex flex-wrap justify-center gap-2 mt-4">
           <Button
             key="home"
-            variant={selectedCategory === '' ? 'secondary' : 'outline'}
+            variant={feedType === 'trending' && selectedCategory === '' ? 'secondary' : 'outline'}
             onClick={() => {
               setSearchQuery('');
+              setFeedType('trending');
               setSelectedCategory('');
               setVideos([]);
               setNextPageToken(null);
               loadTrendingVideos();
             }}
-            className={selectedCategory === '' ? 'bg-blue-600 text-white hover:bg-blue-700' : ''}
+            className={feedType === 'trending' && selectedCategory === '' ? 'bg-blue-600 text-white hover:bg-blue-700' : ''}
           >
             Home
+          </Button>
+          <Button
+            key="shorts"
+            variant={feedType === 'shorts' ? 'secondary' : 'outline'}
+            onClick={() => {
+              setSearchQuery('');
+              setSelectedCategory('');
+              setFeedType('shorts');
+              setVideos([]);
+              setNextPageToken(null);
+              loadShortsVideos();
+            }}
+            className={feedType === 'shorts' ? 'bg-blue-600 text-white hover:bg-blue-700' : ''}
+          >
+            Shorts
           </Button>
           {CATEGORY_MAP.map((cat) => (
             <Button
               key={cat.name}
-              variant={selectedCategory === cat.id ? 'secondary' : 'outline'}
-              onClick={() => setSelectedCategory(cat.id)}
-              className={selectedCategory === cat.id ? 'bg-blue-600 text-white hover:bg-blue-700' : ''}
+              variant={selectedCategory === cat.id && feedType === 'trending' ? 'secondary' : 'outline'}
+              onClick={() => {
+                setSearchQuery('');
+                setFeedType('trending');
+                setSelectedCategory(cat.id);
+                setVideos([]);
+                setNextPageToken(null);
+                loadTrendingVideos(cat.id);
+              }}
+              className={selectedCategory === cat.id && feedType === 'trending' ? 'bg-blue-600 text-white hover:bg-blue-700' : ''}
             >
               {cat.name}
             </Button>
@@ -205,7 +306,11 @@ export default function HomePage() {
       {/* 🔥 Title */}
       <div className="p-6">
         <h1 className="text-2xl font-bold mb-6">
-          {searchQuery.trim() ? '🔍 Search Results' : '🔥 Trending in Philippines'}
+          {searchQuery.trim()
+            ? '🔍 Search Results'
+            : feedType === 'shorts'
+              ? '▶️ Shorts'
+              : '🔥 Trending in Philippines'}
         </h1>
 
         {/* 🎥 Videos */}
@@ -216,11 +321,37 @@ export default function HomePage() {
             ))}
           </div>
         ) : Array.isArray(videos) && videos.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-            {videos.map((video, idx) => (
-              <VideoCard key={String(video.id?.videoId || video.id || video.title || idx)} video={video} />
-            ))}
-          </div>
+          searchQuery.trim() ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+              {videos.map((video, idx) => (
+                <VideoCard
+                  key={String(video.id?.videoId || video.id || video.title || idx)}
+                  video={video}
+                  onNavigate={saveHomeState}
+                />
+              ))}
+            </div>
+          ) : feedType === 'shorts' ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {videos.map((video, idx) => (
+                <ShortCard
+                  key={String(video.id || video.title || idx)}
+                  video={video}
+                  onNavigate={saveHomeState}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+              {videos.map((video, idx) => (
+                <VideoCard
+                  key={String(video.id?.videoId || video.id || video.title || idx)}
+                  video={video}
+                  onNavigate={saveHomeState}
+                />
+              ))}
+            </div>
+          )
         ) : showNoVideos && !loading && (!usedFallback || (usedFallback && videos.length === 0)) ? (
           <p className="text-center text-gray-500">No videos found.</p>
         ) : null}

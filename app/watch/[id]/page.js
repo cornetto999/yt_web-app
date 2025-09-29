@@ -106,6 +106,11 @@ export default function WatchPage() {
     } else {
       setupPlayer();
     }
+    // Ensure any existing mini-player stops when entering watch page
+    try {
+      const stopEvt = new CustomEvent('mini-player:stop');
+      window.dispatchEvent(stopEvt);
+    } catch { }
     window.onYouTubeIframeAPIReady = () => {
       setupPlayer();
     };
@@ -475,6 +480,13 @@ export default function WatchPage() {
         <div className="mb-6 flex items-center gap-4">
           <button
             onClick={() => {
+              // Before navigating back, if minimized, hand off to global mini player and avoid unload
+              try {
+                const time = playerRef.current && typeof playerRef.current.getCurrentTime === 'function' ? Math.floor(playerRef.current.getCurrentTime()) : 0;
+                const event = new CustomEvent('mini-player:start', { detail: { id, time } });
+                window.dispatchEvent(event);
+              } catch { }
+
               if (typeof window !== 'undefined' && window.history.length > 1) {
                 router.back();
               } else {
@@ -531,6 +543,20 @@ export default function WatchPage() {
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 19H5V5" /></svg>
                 )}
               </button>
+              {/* Hand off to global mini player when minimized and navigating away */}
+              {minimized && (
+                <button
+                  onClick={() => {
+                    try {
+                      const time = playerRef.current && typeof playerRef.current.getCurrentTime === 'function' ? Math.floor(playerRef.current.getCurrentTime()) : 0;
+                      const event = new CustomEvent('mini-player:start', { detail: { id: videoId, time } });
+                      window.dispatchEvent(event);
+                    } catch { }
+                  }}
+                  className="hidden"
+                  aria-hidden
+                />
+              )}
             </CardContent>
           </Card>
         </div>

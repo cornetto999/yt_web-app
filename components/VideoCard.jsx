@@ -4,7 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { formatCount, formatTimeAgo } from '@/utils/formatters';
 
-export default function VideoCard({ video }) {
+export default function VideoCard({ video, onNavigate }) {
   const {
     id,
     title,
@@ -18,6 +18,13 @@ export default function VideoCard({ video }) {
   return (
     <Link
       href={`/watch/${id}`} // Internal route, not external YouTube
+      onClick={(e) => {
+        try {
+          const stopEvt = new CustomEvent('mini-player:stop');
+          window.dispatchEvent(stopEvt);
+        } catch {}
+        if (onNavigate) onNavigate(e);
+      }}
       className="block group rounded-lg overflow-hidden bg-white shadow hover:shadow-md transition"
     >
       <div className="relative w-full aspect-video bg-gray-200">
