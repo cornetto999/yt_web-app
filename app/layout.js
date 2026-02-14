@@ -1,6 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import MiniPlayer from "@/components/MiniPlayer";
+import { PlayerProvider } from "@/app/providers/PlayerProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -23,8 +24,10 @@ export default function RootLayout({ children }) {
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <MiniPlayer />
-        {children}
+        <PlayerProvider>
+          {children}
+          <MiniPlayer />
+        </PlayerProvider>
       </body>
     </html>
   );

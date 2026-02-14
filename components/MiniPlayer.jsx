@@ -1,136 +1,82 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { usePlayer } from '@/app/providers/PlayerProvider';
+import { Button } from '@/components/ui/button';
 
 export default function MiniPlayer() {
-  const containerRef = useRef(null);
-  const playerRef = useRef(null);
-  const [active, setActive] = useState(false);
-  const [currentVideoId, setCurrentVideoId] = useState(null);
-  const saveIntervalRef = useRef(null);
+  const {
+    currentTrack,
+    isPlaying,
+    autoplay,
+    volume,
+    blockedAutoplay,
+    togglePlay,
+    next,
+    prev,
+    setAutoplay,
+    setVolume,
+  } = usePlayer();
 
-  const ensureApi = () => {
-    return new Promise((resolve) => {
-      if (typeof window === 'undefined') return resolve();
-      if (window.YT && window.YT.Player) return resolve();
-      const tag = document.createElement('script');
-      tag.src = 'https://www.youtube.com/iframe_api';
-      document.body.appendChild(tag);
-      window.onYouTubeIframeAPIReady = () => resolve();
-    });
-  };
-
-  const createPlayer = async () => {
-    await ensureApi();
-    if (!containerRef.current) return;
-    if (playerRef.current) return;
-    playerRef.current = new window.YT.Player(containerRef.current, {
-      playerVars: {
-        autoplay: 1,
-        enablejsapi: 1,
-        rel: 0,
-        modestbranding: 1,
-        playsinline: 1,
-        controls: 1,
-      },
-      events: {},
-    });
-  };
-
-  const persistState = (payload) => {
-    try {
-      const existing = JSON.parse(sessionStorage.getItem('miniPlayerState') || '{}');
-      const next = { ...existing, ...payload };
-      sessionStorage.setItem('miniPlayerState', JSON.stringify(next));
-    } catch {}
-  };
-
-  const startSavingTime = () => {
-    if (saveIntervalRef.current) return;
-    saveIntervalRef.current = setInterval(() => {
-      try {
-        if (playerRef.current && typeof playerRef.current.getCurrentTime === 'function') {
-          const t = Math.floor(playerRef.current.getCurrentTime() || 0);
-          persistState({ time: t });
-        }
-      } catch {}
-    }, 1000);
-  };
-
-  const stopSavingTime = () => {
-    if (saveIntervalRef.current) {
-      clearInterval(saveIntervalRef.current);
-      saveIntervalRef.current = null;
-    }
-  };
-
-  const start = async ({ id, time = 0 }) => {
-    setActive(true);
-    await createPlayer();
-
-    // If already playing same video, avoid reloading; optionally seek forward
-    try {
-      const playingSame = currentVideoId && currentVideoId === id;
-      if (playingSame && playerRef.current) {
-        if (typeof playerRef.current.getCurrentTime === 'function' && typeof playerRef.current.seekTo === 'function') {
-          const cur = Math.floor(playerRef.current.getCurrentTime() || 0);
-          if (Math.abs(cur - time) > 2 && time > cur) {
-            playerRef.current.seekTo(time, true);
-          }
-        }
-        try { playerRef.current.playVideo(); } catch {}
-      } else if (playerRef.current && typeof playerRef.current.loadVideoById === 'function') {
-        playerRef.current.loadVideoById({ videoId: id, startSeconds: time });
-        setCurrentVideoId(id);
-        try { playerRef.current.playVideo(); } catch {}
-      }
-    } catch {}
-
-    persistState({ active: true, id, time });
-    startSavingTime();
-  };
-
-  const stop = () => {
-    if (playerRef.current && typeof playerRef.current.stopVideo === 'function') {
-      try { playerRef.current.stopVideo(); } catch {}
-    }
-    setActive(false);
-    stopSavingTime();
-    persistState({ active: false });
-  };
-
-  useEffect(() => {
-    const onStart = (e) => start(e.detail || {});
-    const onStop = () => stop();
-    window.addEventListener('mini-player:start', onStart);
-    window.addEventListener('mini-player:stop', onStop);
-    // Resume from session if previously active
-    try {
-      const saved = JSON.parse(sessionStorage.getItem('miniPlayerState') || '{}');
-      if (saved && saved.active && saved.id) {
-        start({ id: saved.id, time: saved.time || 0 });
-      }
-    } catch {}
-    return () => {
-      window.removeEventListener('mini-player:start', onStart);
-      window.removeEventListener('mini-player:stop', onStop);
-      stopSavingTime();
-    };
-  }, []);
+  if (!currentTrack) return null;
 
   return (
-    <div
-      className={active ? 'fixed bottom-4 right-4 z-50 w-80 h-44 shadow-2xl rounded-xl overflow-hidden bg-black' : 'hidden'}
-      style={{ maxWidth: '320px', maxHeight: '180px' }}
-    >
-      <div ref={containerRef} className="w-full h-full" />
-      <button
-        onClick={stop}
-        className="absolute top-2 right-2 bg-white/80 hover:bg-white text-gray-800 rounded-full p-1 shadow"
-        aria-label="Close mini player"
-      >
-        ×
-      </button>
+    <div className="fixed bottom-0 left-0 right-0 z-50 border-t bg-white">
+      <div className="max-w-5xl mx-auto px-3 py-2">
+        {blockedAutoplay ? (
+          <div className="text-xs text-amber-600 mb-2">Tap play to start audio.</div>
+        ) : null}
+
+        <div className="flex items-center gap-3">
+          <Link href="/music" className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-12 h-12 rounded overflow-hidden bg-gray-200 shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={currentTrack.thumbnailUrl} alt={currentTrack.title} className="w-full h-full object-cover" />
+            </div>
+
+            <div className="min-w-0">
+              <div className="text-sm font-semibold truncate">{currentTrack.title}</div>
+              <div className="text-xs text-gray-600 truncate">{currentTrack.channelTitle}</div>
+            </div>
+          </Link>
+
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" onClick={prev}>
+              Prev
+            </Button>
+            <Button type="button" variant="secondary" onClick={togglePlay}>
+              {isPlaying ? 'Pause' : 'Play'}
+            </Button>
+            <Button type="button" variant="outline" onClick={next}>
+              Next
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-2 flex items-center gap-3">
+          <label className="text-xs text-gray-700 flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={autoplay}
+              onChange={(e) => setAutoplay(e.target.checked)}
+            />
+            Autoplay
+          </label>
+
+          <div className="flex items-center gap-2 flex-1">
+            <div className="text-xs text-gray-700 w-12">Vol</div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={volume}
+              onChange={(e) => setVolume(e.target.value)}
+              className="w-full"
+            />
+            <div className="text-xs text-gray-600 w-8 text-right">{volume}</div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
