@@ -30,6 +30,23 @@ function dedupeById(list) {
   return out;
 }
 
+function normalizeTrack(raw) {
+  const id = raw?.id?.videoId || raw?.id;
+  if (!id) return null;
+  return {
+    id,
+    title: raw?.title || raw?.snippet?.title || 'Untitled Video',
+    channelTitle: raw?.channelTitle || raw?.snippet?.channelTitle || 'Unknown Channel',
+    thumbnailUrl:
+      raw?.thumbnailUrl ||
+      raw?.snippet?.thumbnails?.high?.url ||
+      raw?.snippet?.thumbnails?.medium?.url ||
+      raw?.snippet?.thumbnails?.default?.url ||
+      `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+    duration: raw?.duration || '',
+  };
+}
+
 export function PlayerProvider({ children }) {
   const containerId = 'yt-music-iframe-player';
 
@@ -342,13 +359,55 @@ export function PlayerProvider({ children }) {
       }
       setIsPlaying(false);
     };
+    const onStart = async (event) => {
+      const payload = event?.detail || {};
+      const id = payload?.id?.videoId || payload?.id;
+      if (!id) return;
+
+      const track = normalizeTrack({
+        id,
+        title: payload.title,
+        channelTitle: payload.channelTitle,
+        thumbnailUrl: payload.thumbnailUrl,
+      });
+      if (!track) return;
+
+      const normalizedQueue = Array.isArray(payload?.queue)
+        ? dedupeById(payload.queue.map((item) => normalizeTrack(item)).filter(Boolean))
+        : [];
+
+      const nextQueue = normalizedQueue.length ? normalizedQueue : [track];
+      const idx = nextQueue.findIndex((item) => item?.id === track.id);
+      const startIndex = idx >= 0 ? idx : 0;
+
+      setQueue(nextQueue);
+      setCurrentIndex(startIndex);
+
+      const p = await ensurePlayer();
+      if (!p) return;
+
+      try {
+        p.loadVideoById(track.id);
+        if (typeof payload?.time === 'number' && payload.time > 0) {
+          try { p.seekTo(payload.time, true); } catch { }
+        }
+        p.playVideo();
+        setIsPlaying(true);
+        setBlockedAutoplay(false);
+      } catch {
+        setBlockedAutoplay(true);
+        setIsPlaying(false);
+      }
+    };
 
     window.addEventListener('music-player:next', onNext);
     window.addEventListener('mini-player:stop', onStop);
+    window.addEventListener('mini-player:start', onStart);
 
     return () => {
       window.removeEventListener('music-player:next', onNext);
       window.removeEventListener('mini-player:stop', onStop);
+      window.removeEventListener('mini-player:start', onStart);
     };
   }, [ensurePlayer, next]);
 

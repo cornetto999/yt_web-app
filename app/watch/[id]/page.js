@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -259,6 +259,71 @@ export default function WatchPage() {
     }
   };
 
+  const handoffToMiniPlayer = useCallback(() => {
+    if (!videoId) return;
+
+    const time = playerRef.current && typeof playerRef.current.getCurrentTime === 'function'
+      ? Math.floor(playerRef.current.getCurrentTime())
+      : 0;
+
+    const handoffQueue = (queue || [])
+      .map((item) => {
+        const queueVideoId = item?.id?.videoId || item?.id;
+        if (!queueVideoId) return null;
+        return {
+          id: queueVideoId,
+          title: item?.snippet?.title || '',
+          channelTitle: item?.snippet?.channelTitle || '',
+          thumbnailUrl:
+            item?.snippet?.thumbnails?.high?.url ||
+            item?.snippet?.thumbnails?.medium?.url ||
+            item?.snippet?.thumbnails?.default?.url ||
+            `https://i.ytimg.com/vi/${queueVideoId}/hqdefault.jpg`,
+        };
+      })
+      .filter(Boolean);
+
+    try {
+      const event = new CustomEvent('mini-player:start', {
+        detail: {
+          id: videoId,
+          time,
+          title: video?.title || 'Current Video',
+          channelTitle: video?.channelTitle || 'Unknown Channel',
+          thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          queue: handoffQueue,
+        },
+      });
+      window.dispatchEvent(event);
+    } catch { }
+  }, [videoId, video?.title, video?.channelTitle, queue]);
+
+  useEffect(() => {
+    return () => {
+      handoffToMiniPlayer();
+    };
+  }, [handoffToMiniPlayer]);
+
+  const playSelectedVideo = useCallback((nextVideoId) => {
+    if (!nextVideoId) return;
+    setAutoplay(true);
+    setMinimized(false);
+    setShowSearchResults(false);
+
+    try {
+      if (playerRef.current && typeof playerRef.current.loadVideoById === 'function') {
+        playerRef.current.loadVideoById(nextVideoId);
+      }
+      if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
+        playerRef.current.playVideo();
+      }
+    } catch (err) {
+      // Keep navigation fallback even if direct play fails.
+    }
+
+    router.push(`/watch/${nextVideoId}`);
+  }, [router]);
+
   // Search functionality
   const handleSearch = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
@@ -474,18 +539,13 @@ export default function WatchPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <div className="max-w-4xl mx-auto">
+    <div className="min-h-screen p-4 pb-24 pt-6 md:p-6">
+      <div className="mx-auto max-w-5xl">
         {/* 🔙 Back Button & 🔍 Search Bar */}
-        <div className="mb-6 flex items-center gap-4">
+        <div className="glass-panel mb-6 flex items-center gap-4 rounded-2xl p-3 md:p-4">
           <button
             onClick={() => {
-              // Before navigating back, if minimized, hand off to global mini player and avoid unload
-              try {
-                const time = playerRef.current && typeof playerRef.current.getCurrentTime === 'function' ? Math.floor(playerRef.current.getCurrentTime()) : 0;
-                const event = new CustomEvent('mini-player:start', { detail: { id, time } });
-                window.dispatchEvent(event);
-              } catch { }
+              handoffToMiniPlayer();
 
               if (typeof window !== 'undefined' && window.history.length > 1) {
                 router.back();
@@ -498,24 +558,24 @@ export default function WatchPage() {
                 }
               }
             }}
-            className="flex items-center gap-2 text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
+            className="flex items-center gap-2 whitespace-nowrap rounded-xl bg-white/80 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-white hover:text-sky-800"
             aria-label="Back"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             Back
           </button>
 
-          <form onSubmit={handleSearch} className="flex gap-2 flex-1">
+          <form onSubmit={handleSearch} className="flex flex-1 gap-2">
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search videos..."
-              className="flex-1 px-4 py-2 rounded-l border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="modern-input h-11 flex-1 rounded-xl"
             />
             <button
               type="submit"
-              className="px-6 py-2 bg-blue-600 text-white rounded-r border border-blue-600 hover:bg-blue-700 transition"
+              className="h-11 rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
               Search
             </button>
@@ -523,16 +583,17 @@ export default function WatchPage() {
         </div>
         {/* 📺 Video Player */}
         <div className={minimized ? 'fixed bottom-4 right-4 z-50 w-80 h-44 shadow-2xl rounded-xl overflow-hidden bg-black' : ''} style={minimized ? { maxWidth: '320px', maxHeight: '180px' } : {}}>
-          <Card className={minimized ? 'w-full h-full rounded-xl overflow-hidden' : 'w-full shadow-xl rounded-2xl overflow-hidden mb-4'}>
+          <Card className={minimized ? 'h-full w-full overflow-hidden rounded-xl' : 'mb-4 w-full overflow-hidden rounded-2xl border-white/70 bg-white/75 shadow-[0_16px_42px_rgba(15,23,42,0.14)] backdrop-blur-sm'}>
             <CardContent className={minimized ? 'relative w-full h-full p-0' : 'relative aspect-video p-0'}>
+              {!minimized && <div className="absolute inset-0 bg-gradient-to-br from-slate-900/10 via-transparent to-sky-500/10" />}
               <div id="youtube-player-container" className="absolute inset-0 w-full h-full" />
               {/* Minimize/Restore Button */}
               <button
                 onClick={() => setMinimized((m) => !m)}
                 className={
                   minimized
-                    ? 'absolute top-2 right-2 bg-white/80 hover:bg-white text-gray-800 rounded-full p-1 shadow'
-                    : 'absolute top-2 right-2 bg-black/60 hover:bg-black text-white rounded-full p-1 shadow'
+                    ? 'absolute right-2 top-2 rounded-full bg-white/80 p-1 text-gray-800 shadow hover:bg-white'
+                    : 'absolute right-3 top-3 rounded-full bg-black/65 p-1.5 text-white shadow transition hover:bg-black'
                 }
                 style={{ zIndex: 10 }}
                 aria-label={minimized ? 'Restore player' : 'Minimize player'}
@@ -547,11 +608,7 @@ export default function WatchPage() {
               {minimized && (
                 <button
                   onClick={() => {
-                    try {
-                      const time = playerRef.current && typeof playerRef.current.getCurrentTime === 'function' ? Math.floor(playerRef.current.getCurrentTime()) : 0;
-                      const event = new CustomEvent('mini-player:start', { detail: { id: videoId, time } });
-                      window.dispatchEvent(event);
-                    } catch { }
+                    handoffToMiniPlayer();
                   }}
                   className="hidden"
                   aria-hidden
@@ -572,10 +629,7 @@ export default function WatchPage() {
                   onClick={() => {
                     const videoId = result.id?.videoId || result.id;
                     if (videoId) {
-                      // Restore video player when selecting a new video
-                      setMinimized(false);
-                      setShowSearchResults(false);
-                      router.push(`/watch/${videoId}`);
+                      playSelectedVideo(videoId);
                     }
                   }}
                   className="cursor-pointer group rounded-lg overflow-hidden bg-gray-50 hover:bg-gray-100 transition"
@@ -619,7 +673,7 @@ export default function WatchPage() {
 
         {/* 📝 Metadata + Subscribe */}
         {!loading && video && (
-          <div className="bg-white p-4 rounded-xl shadow mb-6 flex justify-between items-start flex-col sm:flex-row sm:items-center">
+          <div className="mb-6 flex flex-col items-start justify-between rounded-2xl border border-white/70 bg-white/80 p-4 shadow-[0_12px_34px_rgba(15,23,42,0.1)] sm:flex-row sm:items-center">
             <div>
               <h1 className="text-xl font-semibold text-gray-900 mb-1">
                 {video.title}
@@ -721,11 +775,7 @@ export default function WatchPage() {
                     }`}
                   onClick={() => {
                     // Ensure autoplay when clicking on videos
-                    if (queueVideoId && queueVideoId !== id) {
-                      // Store autoplay preference for the new video
-                      localStorage.setItem('autoplayEnabled', 'true');
-                      router.push(`/watch/${queueVideoId}`);
-                    }
+                    if (queueVideoId && queueVideoId !== id) playSelectedVideo(queueVideoId);
                   }}
                 >
                   {/* Thumbnail */}
