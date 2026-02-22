@@ -36,27 +36,28 @@ export default function ShortCard({ video, onNavigate }) {
         } catch {}
         if (onNavigate) onNavigate(e);
       }}
-      className="block group rounded-xl overflow-hidden bg-white shadow hover:shadow-md transition"
+      className="group block overflow-hidden rounded-2xl border border-white/70 bg-white/80 shadow-[0_8px_24px_rgba(15,23,42,0.1)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_16px_30px_rgba(15,23,42,0.16)]"
     >
-      <div className="relative w-full bg-black" style={{ aspectRatio: '9 / 16' }}>
+      <div className="relative w-full overflow-hidden bg-black" style={{ aspectRatio: '9 / 16' }}>
         <Image
           src={currentSrc}
           alt={title}
           fill
-          className="object-cover"
+          className="object-cover transition duration-500 group-hover:scale-[1.04]"
           sizes="(max-width: 768px) 50vw, 20vw"
           priority={false}
           onError={() => setImgIndex((i) => i + 1)}
         />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent" />
       </div>
 
       <div className="p-3">
-        <h2 className="text-sm font-semibold text-gray-900 line-clamp-2">
+        <h2 className="line-clamp-2 text-sm font-bold text-slate-900">
           {title || 'Untitled Short'}
         </h2>
-        <p className="text-xs text-gray-600">{channelTitle || 'Unknown Channel'}</p>
+        <p className="mt-1 truncate text-xs text-slate-600">{channelTitle || 'Unknown Channel'}</p>
         {(viewCount || publishedAt) && (
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="mt-1 text-xs text-slate-500">
             {formatCount(viewCount)} views • {formatTimeAgo(publishedAt)}
           </p>
         )}
@@ -64,5 +65,3 @@ export default function ShortCard({ video, onNavigate }) {
     </Link>
   );
 }
-
-

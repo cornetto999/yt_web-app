@@ -703,41 +703,64 @@ export default function WatchPage() {
                     high: { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg` }
                   },
                 },
-              }]).map((vid, idx) => (
+              }]).map((vid, idx) => {
+                const queueVideoId = vid?.id?.videoId || vid?.id || null;
+                const thumbnailSrc =
+                  vid?.snippet?.thumbnails?.maxres?.url ||
+                  vid?.snippet?.thumbnails?.high?.url ||
+                  vid?.snippet?.thumbnails?.medium?.url ||
+                  vid?.snippet?.thumbnails?.default?.url ||
+                  (queueVideoId ? `https://i.ytimg.com/vi/${queueVideoId}/hqdefault.jpg` : '/file.svg');
+
+                return (
                 <div
-                  key={vid.id.videoId}
+                  key={String(queueVideoId || idx)}
                   className={`group cursor-pointer flex gap-3 p-2 rounded-lg transition-colors ${vid.id.videoId === id
                     ? 'bg-blue-50 border-l-4 border-blue-500'
                     : 'hover:bg-gray-50'
                     }`}
                   onClick={() => {
                     // Ensure autoplay when clicking on videos
-                    if (vid.id.videoId !== id) {
+                    if (queueVideoId && queueVideoId !== id) {
                       // Store autoplay preference for the new video
                       localStorage.setItem('autoplayEnabled', 'true');
-                      router.push(`/watch/${vid.id.videoId}`);
+                      router.push(`/watch/${queueVideoId}`);
                     }
                   }}
                 >
                   {/* Thumbnail */}
                   <div className="relative flex-shrink-0">
                     <img
-                      src={vid.snippet.thumbnails?.high?.url || vid.snippet.thumbnails?.medium?.url || vid.snippet.thumbnails?.default?.url || `https://i.ytimg.com/vi/${vid.id.videoId}/hqdefault.jpg`}
-                      alt={vid.snippet.title}
+                      src={thumbnailSrc}
+                      alt={vid?.snippet?.title || 'Video thumbnail'}
                       className="w-40 h-24 object-cover rounded-lg"
                       onError={(e) => {
-                        // Fallback to default thumbnail if image fails to load
-                        e.target.src = `https://i.ytimg.com/vi/${vid.id.videoId}/default.jpg`;
+                        const img = e.currentTarget;
+                        const fallbackId = queueVideoId || id;
+                        if (!img.dataset.fallbackStep) {
+                          img.dataset.fallbackStep = '1';
+                          img.src = `https://i.ytimg.com/vi/${fallbackId}/mqdefault.jpg`;
+                          return;
+                        }
+                        if (img.dataset.fallbackStep === '1') {
+                          img.dataset.fallbackStep = '2';
+                          img.src = `https://i.ytimg.com/vi/${fallbackId}/default.jpg`;
+                          return;
+                        }
+                        if (img.dataset.fallbackStep === '2') {
+                          img.dataset.fallbackStep = '3';
+                          img.src = '/file.svg';
+                        }
                       }}
                     />
-                    {vid.id.videoId === id && (
+                    {queueVideoId === id && (
                       <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-lg">
                         <div className="bg-red-600 text-white px-2 py-1 rounded text-xs font-medium">
                           NOW PLAYING
                         </div>
                       </div>
                     )}
-                    {vid.id.videoId !== id && idx === currentIndex + 1 && (
+                    {queueVideoId !== id && idx === currentIndex + 1 && (
                       <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center rounded-lg">
                         <div className="bg-white text-gray-800 px-2 py-1 rounded text-xs font-medium">
                           UP NEXT
@@ -745,7 +768,7 @@ export default function WatchPage() {
                       </div>
                     )}
                     {/* Play button overlay for non-current videos */}
-                    {vid.id.videoId !== id && (
+                    {queueVideoId !== id && (
                       <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 flex items-center justify-center rounded-lg transition-all">
                         <div className="w-8 h-8 bg-white bg-opacity-0 group-hover:bg-opacity-90 rounded-full flex items-center justify-center transition-all">
                           <svg className="w-4 h-4 text-gray-800 opacity-0 group-hover:opacity-100" fill="currentColor" viewBox="0 0 24 24">
@@ -759,23 +782,23 @@ export default function WatchPage() {
                   {/* Video Info */}
                   <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-medium text-gray-900 line-clamp-2 group-hover:text-blue-600 transition-colors">
-                      {vid.snippet.title}
+                      {vid?.snippet?.title || 'Untitled Video'}
                     </h3>
                     <p className="text-xs text-gray-600 mt-1">
-                      {vid.snippet.channelTitle}
+                      {vid?.snippet?.channelTitle || 'Unknown Channel'}
                     </p>
-                    {vid.snippet.publishedAt && (
+                    {vid?.snippet?.publishedAt && (
                       <p className="text-xs text-gray-500 mt-1">
                         {formatTimeAgo(vid.snippet.publishedAt)}
                       </p>
                     )}
-                    {vid.id.videoId === id && (
+                    {queueVideoId === id && (
                       <div className="flex items-center gap-2 mt-2">
                         <div className="w-2 h-2 bg-red-600 rounded-full"></div>
                         <span className="text-xs text-red-600 font-medium">Now Playing</span>
                       </div>
                     )}
-                    {vid.id.videoId !== id && idx === currentIndex + 1 && (
+                    {queueVideoId !== id && idx === currentIndex + 1 && (
                       <div className="flex items-center gap-2 mt-2">
                         <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
                         <span className="text-xs text-gray-600 font-medium">Up Next</span>
@@ -783,7 +806,8 @@ export default function WatchPage() {
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

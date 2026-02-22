@@ -1,15 +1,15 @@
-import { Geist, Geist_Mono } from "next/font/google";
+import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import MiniPlayer from "@/components/MiniPlayer";
 import { PlayerProvider } from "@/app/providers/PlayerProvider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const appSans = Space_Grotesk({
+  variable: "--font-app-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const appMono = JetBrains_Mono({
+  variable: "--font-app-mono",
   subsets: ["latin"],
 });
 
@@ -22,7 +22,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${appSans.variable} ${appMono.variable} antialiased`}
       >
         <PlayerProvider>
           {children}

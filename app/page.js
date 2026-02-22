@@ -4,8 +4,6 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import VideoCard from '@/components/VideoCard';
 import ShortCard from '@/components/ShortCard';
 import { Button } from '@/components/ui/button';
-import Link from 'next/link';
-import { useSearchParams, useRouter } from 'next/navigation';
 
 const CATEGORY_MAP = [
   { name: 'Music', id: '10' }, // YouTube categoryId 10
@@ -232,136 +230,153 @@ export default function HomePage() {
     } catch { }
   }, [searchQuery, selectedCategory, feedType, videos, nextPageToken]);
 
+  const sectionTitle = searchQuery.trim()
+    ? 'Search Results'
+    : feedType === 'shorts'
+      ? 'Shorts Feed'
+      : 'Trending in Philippines';
+
   return (
-    <main className="min-h-screen bg-gray-100">
-      {/* 🔍 Sticky Search */}
-      <div className="sticky top-0 z-50 bg-gray-100 pb-4 pt-2 shadow">
-        <form onSubmit={handleSearch} className="flex justify-center px-4">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search videos..."
-            className="w-full max-w-md px-4 py-2 rounded-l border border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary"
-          />
-          <button
-            type="submit"
-            className="px-4 py-2 bg-primary text-white rounded-r border border-primary hover:bg-primary-foreground transition"
-          >
-            Search
-          </button>
-        </form>
-        {/* Category Buttons */}
-        <div className="flex flex-wrap justify-center gap-2 mt-4">
-          <Button
-            key="home"
-            variant={feedType === 'trending' && selectedCategory === '' ? 'secondary' : 'outline'}
-            onClick={() => {
-              setSearchQuery('');
-              setFeedType('trending');
-              setSelectedCategory('');
-              setVideos([]);
-              setNextPageToken(null);
-              loadTrendingVideos();
-            }}
-            className={feedType === 'trending' && selectedCategory === '' ? 'bg-blue-600 text-white hover:bg-blue-700' : ''}
-          >
-            Home
-          </Button>
-          <Button
-            key="shorts"
-            variant={feedType === 'shorts' ? 'secondary' : 'outline'}
-            onClick={() => {
-              setSearchQuery('');
-              setSelectedCategory('');
-              setFeedType('shorts');
-              setVideos([]);
-              setNextPageToken(null);
-              loadShortsVideos();
-            }}
-            className={feedType === 'shorts' ? 'bg-blue-600 text-white hover:bg-blue-700' : ''}
-          >
-            Shorts
-          </Button>
-          {CATEGORY_MAP.map((cat) => (
-            <Button
-              key={cat.name}
-              variant={selectedCategory === cat.id && feedType === 'trending' ? 'secondary' : 'outline'}
-              onClick={() => {
-                setSearchQuery('');
-                setFeedType('trending');
-                setSelectedCategory(cat.id);
-                setVideos([]);
-                setNextPageToken(null);
-                loadTrendingVideos(cat.id);
-              }}
-              className={selectedCategory === cat.id && feedType === 'trending' ? 'bg-blue-600 text-white hover:bg-blue-700' : ''}
-            >
-              {cat.name}
-            </Button>
-          ))}
-        </div>
-      </div>
+    <main className="min-h-screen pb-24 pt-4 md:pt-8">
+      <div className="pointer-events-none fixed inset-x-0 top-0 -z-10 mx-auto h-96 max-w-6xl rounded-[100px] bg-gradient-to-br from-sky-300/20 via-cyan-300/10 to-blue-500/20 blur-3xl" />
 
-      {/* 🔥 Title */}
-      <div className="p-6">
-        <h1 className="text-2xl font-bold mb-6">
-          {searchQuery.trim()
-            ? '🔍 Search Results'
-            : feedType === 'shorts'
-              ? '▶️ Shorts'
-              : '🔥 Trending in Philippines'}
-        </h1>
+      <div className="mx-auto w-full max-w-7xl px-4 md:px-6">
+        <section className="glass-panel relative overflow-hidden px-4 py-6 md:px-8 md:py-8">
+          <div className="absolute -right-16 -top-20 h-52 w-52 rounded-full bg-sky-400/20 blur-3xl" />
+          <div className="absolute -bottom-24 left-16 h-56 w-56 rounded-full bg-cyan-300/20 blur-3xl" />
 
-        {/* 🎥 Videos */}
-        {loading || (!Array.isArray(videos) || videos.length === 0) && !showNoVideos ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-            {Array.from({ length: 9 }).map((_, i) => (
-              <div key={i} className="animate-pulse bg-gray-200 h-48 rounded-xl" />
-            ))}
+          <div className="relative">
+            <div className="mb-5 animate-[fade-up_0.45s_ease-out]">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700/80">Discover</p>
+              <h1 className="mt-1 text-2xl font-bold text-slate-900 md:text-4xl">Find the next video worth watching</h1>
+            </div>
+
+            <form onSubmit={handleSearch} className="relative mx-auto flex w-full animate-[fade-up_0.55s_ease-out] items-center gap-2 md:max-w-2xl">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search videos, channels, topics..."
+                className="modern-input w-full"
+              />
+              <button
+                type="submit"
+                className="h-12 shrink-0 rounded-2xl bg-slate-900 px-5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(15,23,42,0.25)] transition hover:bg-slate-800"
+              >
+                Search
+              </button>
+            </form>
+
+            <div className="mt-5 flex flex-wrap justify-center gap-2.5 animate-[fade-up_0.65s_ease-out]">
+              <Button
+                key="home"
+                variant="ghost"
+                onClick={() => {
+                  setSearchQuery('');
+                  setFeedType('trending');
+                  setSelectedCategory('');
+                  setVideos([]);
+                  setNextPageToken(null);
+                  loadTrendingVideos();
+                }}
+                className={`modern-chip ${feedType === 'trending' && selectedCategory === '' ? 'modern-chip-active hover:bg-sky-500 hover:text-white' : ''}`}
+              >
+                Home
+              </Button>
+              <Button
+                key="shorts"
+                variant="ghost"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSelectedCategory('');
+                  setFeedType('shorts');
+                  setVideos([]);
+                  setNextPageToken(null);
+                  loadShortsVideos();
+                }}
+                className={`modern-chip ${feedType === 'shorts' ? 'modern-chip-active hover:bg-sky-500 hover:text-white' : ''}`}
+              >
+                Shorts
+              </Button>
+              {CATEGORY_MAP.map((cat) => (
+                <Button
+                  key={cat.name}
+                  variant="ghost"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setFeedType('trending');
+                    setSelectedCategory(cat.id);
+                    setVideos([]);
+                    setNextPageToken(null);
+                    loadTrendingVideos(cat.id);
+                  }}
+                  className={`modern-chip ${selectedCategory === cat.id && feedType === 'trending' ? 'modern-chip-active hover:bg-sky-500 hover:text-white' : ''}`}
+                >
+                  {cat.name}
+                </Button>
+              ))}
+            </div>
           </div>
-        ) : Array.isArray(videos) && videos.length > 0 ? (
-          searchQuery.trim() ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-              {videos.map((video, idx) => (
-                <VideoCard
-                  key={String(video.id?.videoId || video.id || video.title || idx)}
-                  video={video}
-                  onNavigate={saveHomeState}
-                />
-              ))}
-            </div>
-          ) : feedType === 'shorts' ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-              {videos.map((video, idx) => (
-                <ShortCard
-                  key={String(video.id || video.title || idx)}
-                  video={video}
-                  onNavigate={saveHomeState}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-              {videos.map((video, idx) => (
-                <VideoCard
-                  key={String(video.id?.videoId || video.id || video.title || idx)}
-                  video={video}
-                  onNavigate={saveHomeState}
-                />
-              ))}
-            </div>
-          )
-        ) : showNoVideos && !loading && (!usedFallback || (usedFallback && videos.length === 0)) ? (
-          <p className="text-center text-gray-500">No videos found.</p>
-        ) : null}
+        </section>
 
-        {/* Infinite scroll loader */}
-        {!searchQuery && nextPageToken && (
-          <div ref={loaderRef} className="h-12 flex items-center justify-center">
-            {isFetchingMore && <span className="text-gray-500">Loading more...</span>}
+        <section className="mt-8 rounded-3xl border border-white/60 bg-white/45 px-4 py-6 shadow-[0_8px_40px_rgba(15,23,42,0.05)] backdrop-blur-sm md:px-6 md:py-8">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-xl font-bold text-slate-900 md:text-2xl">{sectionTitle}</h2>
+            {!loading && Array.isArray(videos) && videos.length > 0 ? (
+              <p className="rounded-full border border-slate-200 bg-white/85 px-3 py-1 text-xs font-semibold text-slate-600">
+                {videos.length} loaded
+              </p>
+            ) : null}
           </div>
-        )}
+
+          {loading || (!Array.isArray(videos) || videos.length === 0) && !showNoVideos ? (
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3">
+              {Array.from({ length: 9 }).map((_, i) => (
+                <div key={i} className="skeleton-card h-52 rounded-2xl" />
+              ))}
+            </div>
+          ) : Array.isArray(videos) && videos.length > 0 ? (
+            searchQuery.trim() ? (
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3">
+                {videos.map((video, idx) => (
+                  <VideoCard
+                    key={String(video.id?.videoId || video.id || video.title || idx)}
+                    video={video}
+                    onNavigate={saveHomeState}
+                  />
+                ))}
+              </div>
+            ) : feedType === 'shorts' ? (
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+                {videos.map((video, idx) => (
+                  <ShortCard
+                    key={String(video.id || video.title || idx)}
+                    video={video}
+                    onNavigate={saveHomeState}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3">
+                {videos.map((video, idx) => (
+                  <VideoCard
+                    key={String(video.id?.videoId || video.id || video.title || idx)}
+                    video={video}
+                    onNavigate={saveHomeState}
+                  />
+                ))}
+              </div>
+            )
+          ) : showNoVideos && !loading && (!usedFallback || (usedFallback && videos.length === 0)) ? (
+            <p className="rounded-2xl border border-slate-200 bg-white/85 py-10 text-center text-slate-500">No videos found.</p>
+          ) : null}
+
+          {!searchQuery && nextPageToken && (
+            <div ref={loaderRef} className="mt-6 h-12 flex items-center justify-center">
+              {isFetchingMore && <span className="text-sm font-medium text-slate-500">Loading more...</span>}
+            </div>
+          )}
+        </section>
       </div>
     </main>
   );
