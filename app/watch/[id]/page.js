@@ -28,6 +28,8 @@ export default function WatchPage() {
   const [searchQuery, setSearchQuery] = useState(''); // Search query for watch page
   const [searchResults, setSearchResults] = useState([]); // Search results
   const [showSearchResults, setShowSearchResults] = useState(false); // Show search results
+  const [playerVolume, setPlayerVolume] = useState(80); // Watch player volume
+  const handoffRef = useRef(() => { });
 
   // Update autoplay ref whenever autoplay state changes
   useEffect(() => {
@@ -183,6 +185,13 @@ export default function WatchPage() {
       events: {
         onReady: () => {
           setPlayerReady(true);
+          try {
+            if (playerRef.current && typeof playerRef.current.setVolume === 'function') {
+              playerRef.current.setVolume(playerVolume);
+            }
+          } catch (err) {
+            // Ignore volume sync errors while player initializes.
+          }
           // Ensure video starts playing with multiple attempts
           const playVideo = () => {
             if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
@@ -299,10 +308,32 @@ export default function WatchPage() {
   }, [videoId, video?.title, video?.channelTitle, queue]);
 
   useEffect(() => {
-    return () => {
-      handoffToMiniPlayer();
-    };
+    handoffRef.current = handoffToMiniPlayer;
   }, [handoffToMiniPlayer]);
+
+  useEffect(() => {
+    return () => {
+      if (handoffRef.current) handoffRef.current();
+    };
+  }, []);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && handoffRef.current) {
+        handoffRef.current();
+      }
+    };
+    const onPageHide = () => {
+      if (handoffRef.current) handoffRef.current();
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, []);
 
   const playSelectedVideo = useCallback((nextVideoId) => {
     if (!nextVideoId) return;
@@ -323,6 +354,15 @@ export default function WatchPage() {
 
     router.push(`/watch/${nextVideoId}`);
   }, [router]);
+
+  useEffect(() => {
+    if (!playerRef.current || typeof playerRef.current.setVolume !== 'function') return;
+    try {
+      playerRef.current.setVolume(playerVolume);
+    } catch (err) {
+      // Ignore setVolume failures during player transitions.
+    }
+  }, [playerVolume]);
 
   // Search functionality
   const handleSearch = async (e) => {
@@ -613,6 +653,20 @@ export default function WatchPage() {
                   className="hidden"
                   aria-hidden
                 />
+              )}
+              {!minimized && (
+                <div className="absolute bottom-3 left-3 right-3 z-10 flex items-center gap-3 rounded-xl bg-black/55 px-3 py-2 backdrop-blur">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-white/90">Volume</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={playerVolume}
+                    onChange={(e) => setPlayerVolume(Number(e.target.value))}
+                    className="w-full accent-sky-400"
+                  />
+                  <span className="w-8 text-right text-xs font-semibold text-white/90">{playerVolume}</span>
+                </div>
               )}
             </CardContent>
           </Card>

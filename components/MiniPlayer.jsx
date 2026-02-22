@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePlayer } from '@/app/providers/PlayerProvider';
 import { Button } from '@/components/ui/button';
+import { SkipBack, SkipForward, Pause, Play } from 'lucide-react';
 
 export default function MiniPlayer() {
   const {
@@ -41,11 +42,33 @@ export default function MiniPlayer() {
           </Link>
 
           <div className="flex items-center gap-1.5">
-            <Button type="button" variant="outline" onClick={prev} className="h-8 rounded-xl bg-white/85 px-3">Prev</Button>
-            <Button type="button" variant="secondary" onClick={togglePlay} className="h-8 rounded-xl bg-slate-900 px-3 text-white hover:bg-slate-800 hover:text-white">
-              {isPlaying ? 'Pause' : 'Play'}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={prev}
+              className="size-8 rounded-xl bg-white/85 p-0"
+              aria-label="Previous track"
+            >
+              <SkipBack className="size-4" />
             </Button>
-            <Button type="button" variant="outline" onClick={next} className="h-8 rounded-xl bg-white/85 px-3">Next</Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={togglePlay}
+              className="size-8 rounded-xl bg-slate-900 p-0 text-white hover:bg-slate-800 hover:text-white"
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+            >
+              {isPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={next}
+              className="size-8 rounded-xl bg-white/85 p-0"
+              aria-label="Next track"
+            >
+              <SkipForward className="size-4" />
+            </Button>
           </div>
         </div>
 
