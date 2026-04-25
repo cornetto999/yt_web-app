@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
+import Link from 'next/link';
 import VideoCard from '@/components/VideoCard';
 import ShortCard from '@/components/ShortCard';
 import { Button } from '@/components/ui/button';
@@ -237,7 +238,7 @@ export default function HomePage() {
       : 'Trending in Philippines';
 
   return (
-    <main className="min-h-screen pb-24 pt-4 md:pt-8">
+    <main className="min-h-screen pb-32 pt-4 md:pb-24 md:pt-8">
       <div className="pointer-events-none fixed inset-x-0 top-0 -z-10 mx-auto h-96 max-w-6xl rounded-[100px] bg-gradient-to-br from-sky-300/20 via-cyan-300/10 to-blue-500/20 blur-3xl" />
 
       <div className="mx-auto w-full max-w-7xl px-4 md:px-6">
@@ -246,12 +247,20 @@ export default function HomePage() {
           <div className="absolute -bottom-24 left-16 h-56 w-56 rounded-full bg-cyan-300/20 blur-3xl" />
 
           <div className="relative">
-            <div className="mb-5 animate-[fade-up_0.45s_ease-out]">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700/80">Discover</p>
-              <h1 className="mt-1 text-2xl font-bold text-slate-900 md:text-4xl">Find the next video worth watching</h1>
+            <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="animate-[fade-up_0.45s_ease-out]">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700/80">Discover</p>
+                <h1 className="mt-1 text-[1.75rem] font-bold leading-tight text-slate-900 sm:text-3xl md:text-4xl">Find the next video worth watching</h1>
+              </div>
+              <Link
+                href="/about"
+                className="inline-flex h-10 w-full items-center justify-center rounded-full border border-white/75 bg-white/80 px-4 text-sm font-semibold text-slate-700 shadow-[0_4px_16px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:border-sky-300 hover:text-slate-900 sm:w-auto"
+              >
+                About
+              </Link>
             </div>
 
-            <form onSubmit={handleSearch} className="relative mx-auto flex w-full animate-[fade-up_0.55s_ease-out] items-center gap-2 md:max-w-2xl">
+            <form onSubmit={handleSearch} className="relative mx-auto flex w-full animate-[fade-up_0.55s_ease-out] flex-col gap-2 sm:flex-row sm:items-center md:max-w-2xl">
               <input
                 type="text"
                 value={searchQuery}
@@ -261,13 +270,13 @@ export default function HomePage() {
               />
               <button
                 type="submit"
-                className="h-12 shrink-0 rounded-2xl bg-slate-900 px-5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(15,23,42,0.25)] transition hover:bg-slate-800"
+                className="h-12 w-full shrink-0 rounded-2xl bg-slate-900 px-5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(15,23,42,0.25)] transition hover:bg-slate-800 sm:w-auto"
               >
                 Search
               </button>
             </form>
 
-            <div className="mt-5 flex flex-wrap justify-center gap-2.5 animate-[fade-up_0.65s_ease-out]">
+            <div className="no-scrollbar -mx-1 mt-5 flex gap-2.5 overflow-x-auto px-1 pb-1 animate-[fade-up_0.65s_ease-out] sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0">
               <Button
                 key="home"
                 variant="ghost"
@@ -279,7 +288,7 @@ export default function HomePage() {
                   setNextPageToken(null);
                   loadTrendingVideos();
                 }}
-                className={`modern-chip ${feedType === 'trending' && selectedCategory === '' ? 'modern-chip-active hover:bg-sky-500 hover:text-white' : ''}`}
+                className={`modern-chip shrink-0 ${feedType === 'trending' && selectedCategory === '' ? 'modern-chip-active hover:bg-sky-500 hover:text-white' : ''}`}
               >
                 Home
               </Button>
@@ -294,7 +303,7 @@ export default function HomePage() {
                   setNextPageToken(null);
                   loadShortsVideos();
                 }}
-                className={`modern-chip ${feedType === 'shorts' ? 'modern-chip-active hover:bg-sky-500 hover:text-white' : ''}`}
+                className={`modern-chip shrink-0 ${feedType === 'shorts' ? 'modern-chip-active hover:bg-sky-500 hover:text-white' : ''}`}
               >
                 Shorts
               </Button>
@@ -310,7 +319,7 @@ export default function HomePage() {
                     setNextPageToken(null);
                     loadTrendingVideos(cat.id);
                   }}
-                  className={`modern-chip ${selectedCategory === cat.id && feedType === 'trending' ? 'modern-chip-active hover:bg-sky-500 hover:text-white' : ''}`}
+                  className={`modern-chip shrink-0 ${selectedCategory === cat.id && feedType === 'trending' ? 'modern-chip-active hover:bg-sky-500 hover:text-white' : ''}`}
                 >
                   {cat.name}
                 </Button>
@@ -320,7 +329,7 @@ export default function HomePage() {
         </section>
 
         <section className="mt-8 rounded-3xl border border-white/60 bg-white/45 px-4 py-6 shadow-[0_8px_40px_rgba(15,23,42,0.05)] backdrop-blur-sm md:px-6 md:py-8">
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="mb-6 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-xl font-bold text-slate-900 md:text-2xl">{sectionTitle}</h2>
             {!loading && Array.isArray(videos) && videos.length > 0 ? (
               <p className="rounded-full border border-slate-200 bg-white/85 px-3 py-1 text-xs font-semibold text-slate-600">

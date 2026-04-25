@@ -7,6 +7,51 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { formatCount, formatTimeAgo } from '@/utils/formatters';
 
+function getItemVideoId(item) {
+  return item?.id?.videoId || item?.id || null;
+}
+
+function getThumbnailSources(item) {
+  const itemVideoId = getItemVideoId(item);
+  return [
+    item?.thumbnailUrl,
+    item?.snippet?.thumbnails?.maxres?.url,
+    item?.snippet?.thumbnails?.standard?.url,
+    item?.snippet?.thumbnails?.high?.url,
+    item?.snippet?.thumbnails?.medium?.url,
+    item?.snippet?.thumbnails?.default?.url,
+    itemVideoId ? `https://i.ytimg.com/vi/${itemVideoId}/hqdefault.jpg` : null,
+    itemVideoId ? `https://i.ytimg.com/vi/${itemVideoId}/mqdefault.jpg` : null,
+    itemVideoId ? `https://i.ytimg.com/vi/${itemVideoId}/default.jpg` : null,
+    '/file.svg',
+  ].filter(Boolean);
+}
+
+function ThumbnailImage({ item, alt, className }) {
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const sources = getThumbnailSources(item);
+  const currentSrc = sources[Math.min(sourceIndex, Math.max(sources.length - 1, 0))] || '/file.svg';
+  const itemKey = getItemVideoId(item) || item?.title || item?.snippet?.title || '';
+
+  useEffect(() => {
+    setSourceIndex(0);
+  }, [itemKey]);
+
+  return (
+    <img
+      src={currentSrc}
+      alt={alt}
+      className={className}
+      onError={() => {
+        setSourceIndex((prev) => {
+          if (prev >= sources.length - 1) return prev;
+          return prev + 1;
+        });
+      }}
+    />
+  );
+}
+
 export default function WatchPage() {
   const { id } = useParams();
   const router = useRouter();
@@ -29,7 +74,22 @@ export default function WatchPage() {
   const [searchResults, setSearchResults] = useState([]); // Search results
   const [showSearchResults, setShowSearchResults] = useState(false); // Show search results
   const [playerVolume, setPlayerVolume] = useState(80); // Watch player volume
+  const [playerTime, setPlayerTime] = useState({ current: 0, duration: 0 }); // Watch player time
   const handoffRef = useRef(() => { });
+  const resumeTimeRef = useRef(0);
+
+  const formatPlayerTime = (seconds) => {
+    const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+
+    return `${minutes}:${String(secs).padStart(2, '0')}`;
+  };
 
   // Update autoplay ref whenever autoplay state changes
   useEffect(() => {
@@ -67,6 +127,18 @@ export default function WatchPage() {
         if (playerRef.current && typeof playerRef.current.getPlayerState === 'function') {
           try {
             const currentState = playerRef.current.getPlayerState();
+            const currentTime = typeof playerRef.current.getCurrentTime === 'function'
+              ? playerRef.current.getCurrentTime()
+              : 0;
+            const duration = typeof playerRef.current.getDuration === 'function'
+              ? playerRef.current.getDuration()
+              : 0;
+
+            setPlayerTime({
+              current: currentTime,
+              duration,
+            });
+
             if (currentState !== lastPlayerState) {
               setLastPlayerState(currentState);
 
@@ -97,6 +169,44 @@ export default function WatchPage() {
   const videoId = id;
   const videoUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1&rel=0&modestbranding=1&showinfo=0&iv_load_policy=3`;
 
+  const normalizeQueueItem = (item) => {
+    const itemVideoId = getItemVideoId(item);
+    if (!itemVideoId) return null;
+
+    const title = item?.title || item?.snippet?.title || 'Untitled Video';
+    const channelTitle = item?.channelTitle || item?.snippet?.channelTitle || 'Unknown Channel';
+    const publishedAt = item?.publishedAt || item?.snippet?.publishedAt || '';
+    const thumbnailUrl =
+      item?.thumbnailUrl ||
+      item?.snippet?.thumbnails?.maxres?.url ||
+      item?.snippet?.thumbnails?.standard?.url ||
+      item?.snippet?.thumbnails?.high?.url ||
+      item?.snippet?.thumbnails?.medium?.url ||
+      item?.snippet?.thumbnails?.default?.url ||
+      `https://i.ytimg.com/vi/${itemVideoId}/hqdefault.jpg`;
+
+    return {
+      ...item,
+      id: { videoId: itemVideoId },
+      title,
+      channelTitle,
+      publishedAt,
+      thumbnailUrl,
+      snippet: {
+        ...(item?.snippet || {}),
+        title,
+        channelTitle,
+        publishedAt,
+        thumbnails: {
+          ...(item?.snippet?.thumbnails || {}),
+          default: { url: item?.snippet?.thumbnails?.default?.url || `https://i.ytimg.com/vi/${itemVideoId}/default.jpg` },
+          medium: { url: item?.snippet?.thumbnails?.medium?.url || `https://i.ytimg.com/vi/${itemVideoId}/mqdefault.jpg` },
+          high: { url: item?.snippet?.thumbnails?.high?.url || thumbnailUrl },
+        },
+      },
+    };
+  };
+
 
 
   // Load YouTube IFrame API once and create player on mount
@@ -121,8 +231,30 @@ export default function WatchPage() {
 
   // When videoId changes, load new video if player is ready
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = sessionStorage.getItem('watchResumeState');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if ((parsed?.id === videoId || parsed?.id === id) && Number(parsed?.time) > 0) {
+            resumeTimeRef.current = Number(parsed.time);
+          }
+          sessionStorage.removeItem('watchResumeState');
+        }
+      } catch { }
+    }
+
     if (playerReady && playerRef.current && typeof playerRef.current.loadVideoById === 'function') {
-      playerRef.current.loadVideoById(videoId);
+      const startSeconds = Math.max(0, Number(resumeTimeRef.current) || 0);
+      if (startSeconds > 0) {
+        playerRef.current.loadVideoById({
+          videoId,
+          startSeconds,
+        });
+      } else {
+        playerRef.current.loadVideoById(videoId);
+      }
+      resumeTimeRef.current = 0;
       // Ensure the new video starts playing with multiple attempts
       const playVideo = () => {
         if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
@@ -143,7 +275,7 @@ export default function WatchPage() {
       setTimeout(playVideo, 4000);
     }
     // eslint-disable-next-line
-  }, [videoId, playerReady]);
+  }, [videoId, playerReady, id]);
 
   // Fetch video details, comments, and related videos (queue)
   useEffect(() => {
@@ -185,6 +317,15 @@ export default function WatchPage() {
       events: {
         onReady: () => {
           setPlayerReady(true);
+          const startSeconds = Math.max(0, Number(resumeTimeRef.current) || 0);
+          try {
+            const duration = playerRef.current && typeof playerRef.current.getDuration === 'function'
+              ? playerRef.current.getDuration()
+              : 0;
+            setPlayerTime({ current: 0, duration });
+          } catch (err) {
+            // Ignore initial time read failures while player initializes.
+          }
           try {
             if (playerRef.current && typeof playerRef.current.setVolume === 'function') {
               playerRef.current.setVolume(playerVolume);
@@ -196,6 +337,10 @@ export default function WatchPage() {
           const playVideo = () => {
             if (playerRef.current && typeof playerRef.current.playVideo === 'function') {
               try {
+                if (startSeconds > 0 && typeof playerRef.current.seekTo === 'function') {
+                  playerRef.current.seekTo(startSeconds, true);
+                  resumeTimeRef.current = 0;
+                }
                 playerRef.current.playVideo();
               } catch (err) {
                 console.log('Play video failed, retrying...');
@@ -484,7 +629,10 @@ export default function WatchPage() {
 
       // Deduplicate by videoId
       const seen = new Set();
-      const deduped = items.filter((v) => {
+      const deduped = items
+        .map((item) => normalizeQueueItem(item))
+        .filter(Boolean)
+        .filter((v) => {
         const vid = v.id && v.id.videoId;
         if (!vid || seen.has(vid)) return false;
         seen.add(vid);
@@ -494,7 +642,7 @@ export default function WatchPage() {
       // Always add the current video to the beginning of the queue
       const currentVideoInQueue = deduped.find(v => v.id.videoId === vid);
       if (!currentVideoInQueue) {
-        deduped.unshift({
+        deduped.unshift(normalizeQueueItem({
           id: { videoId: vid },
           snippet: {
             title: video?.title || 'Current Video',
@@ -505,7 +653,7 @@ export default function WatchPage() {
               high: { url: `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` }
             },
           },
-        });
+        }));
       }
 
       // If we still don't have any videos, add some default popular videos as fallback
@@ -521,26 +669,26 @@ export default function WatchPage() {
 
         fallbackVideoIds.forEach((fallbackId, index) => {
           if (fallbackId !== vid) {
-            deduped.push({
+            deduped.push(normalizeQueueItem({
               id: { videoId: fallbackId },
               snippet: {
                 title: `Fallback Video ${index + 1}`,
                 channelTitle: 'Popular Videos',
                 thumbnails: { default: { url: `https://i.ytimg.com/vi/${fallbackId}/default.jpg` } },
               },
-            });
+            }));
           }
         });
 
         // Always add the current video as well
-        deduped.unshift({
+        deduped.unshift(normalizeQueueItem({
           id: { videoId: vid },
           snippet: {
             title: video?.title || 'Current Video',
             channelTitle: video?.channelTitle || 'Unknown Channel',
             thumbnails: { default: { url: `https://i.ytimg.com/vi/${vid}/default.jpg` } },
           },
-        });
+        }));
       }
 
       setQueue(deduped);
@@ -555,34 +703,34 @@ export default function WatchPage() {
         'fJ9rUzIMcZQ', // Queen - Bohemian Rhapsody
       ];
 
-      const fallbackQueue = fallbackVideoIds.map((fallbackId, index) => ({
+      const fallbackQueue = fallbackVideoIds.map((fallbackId, index) => normalizeQueueItem({
         id: { videoId: fallbackId },
         snippet: {
           title: `Fallback Video ${index + 1}`,
           channelTitle: 'Popular Videos',
           thumbnails: { default: { url: `https://i.ytimg.com/vi/${fallbackId}/default.jpg` } },
         },
-      }));
+      })).filter(Boolean);
 
       // Add current video to the beginning
-      fallbackQueue.unshift({
+      fallbackQueue.unshift(normalizeQueueItem({
         id: { videoId: vid },
         snippet: {
           title: video?.title || 'Current Video',
           channelTitle: video?.channelTitle || 'Unknown Channel',
           thumbnails: { default: { url: `https://i.ytimg.com/vi/${vid}/default.jpg` } },
         },
-      });
+      }));
 
       setQueue(fallbackQueue);
     }
   };
 
   return (
-    <div className="min-h-screen p-4 pb-24 pt-6 md:p-6">
+    <div className="min-h-screen p-3 pb-32 pt-4 md:p-6">
       <div className="mx-auto max-w-5xl">
         {/* 🔙 Back Button & 🔍 Search Bar */}
-        <div className="glass-panel mb-6 flex items-center gap-4 rounded-2xl p-3 md:p-4">
+        <div className="glass-panel mb-6 flex flex-col gap-3 rounded-2xl p-3 md:flex-row md:items-center md:gap-4 md:p-4">
           <button
             onClick={() => {
               handoffToMiniPlayer();
@@ -598,14 +746,14 @@ export default function WatchPage() {
                 }
               }
             }}
-            className="flex items-center gap-2 whitespace-nowrap rounded-xl bg-white/80 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-white hover:text-sky-800"
+            className="flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-white/80 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-white hover:text-sky-800 md:w-auto md:justify-start"
             aria-label="Back"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             Back
           </button>
 
-          <form onSubmit={handleSearch} className="flex flex-1 gap-2">
+          <form onSubmit={handleSearch} className="flex w-full flex-1 flex-col gap-2 sm:flex-row">
             <input
               type="text"
               value={searchQuery}
@@ -615,18 +763,31 @@ export default function WatchPage() {
             />
             <button
               type="submit"
-              className="h-11 rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
+              className="h-11 w-full rounded-xl bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 sm:w-auto"
             >
               Search
             </button>
           </form>
         </div>
         {/* 📺 Video Player */}
-        <div className={minimized ? 'fixed bottom-4 right-4 z-50 w-80 h-44 shadow-2xl rounded-xl overflow-hidden bg-black' : ''} style={minimized ? { maxWidth: '320px', maxHeight: '180px' } : {}}>
-          <Card className={minimized ? 'h-full w-full overflow-hidden rounded-xl' : 'mb-4 w-full overflow-hidden rounded-2xl border-white/70 bg-white/75 shadow-[0_16px_42px_rgba(15,23,42,0.14)] backdrop-blur-sm'}>
-            <CardContent className={minimized ? 'relative w-full h-full p-0' : 'relative aspect-video p-0'}>
+        <div className={minimized ? 'fixed inset-x-3 bottom-3 z-50 overflow-hidden rounded-xl bg-black shadow-2xl sm:inset-x-auto sm:bottom-4 sm:right-4 sm:w-80' : ''}>
+          <Card className={minimized ? 'w-full overflow-hidden rounded-xl' : 'mb-4 w-full overflow-hidden rounded-2xl border-white/70 bg-white/75 shadow-[0_16px_42px_rgba(15,23,42,0.14)] backdrop-blur-sm'}>
+            <CardContent className={minimized ? 'relative aspect-video w-full p-0' : 'relative aspect-video p-0'}>
               {!minimized && <div className="absolute inset-0 bg-gradient-to-br from-slate-900/10 via-transparent to-sky-500/10" />}
               <div id="youtube-player-container" className="absolute inset-0 w-full h-full" />
+              {minimized && (
+                <button
+                  type="button"
+                  onClick={() => setMinimized(false)}
+                  className="absolute inset-0 z-[5] cursor-pointer bg-black/10 transition hover:bg-black/5"
+                  aria-label="Open mini player"
+                >
+                  <div className="absolute bottom-3 left-3 right-3 flex flex-col items-start gap-1 rounded-2xl bg-black/55 px-3 py-2 text-xs font-semibold text-white backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                    <span>Tap to expand</span>
+                    <span>{formatPlayerTime(playerTime.current)} / {formatPlayerTime(playerTime.duration)}</span>
+                  </div>
+                </button>
+              )}
               {/* Minimize/Restore Button */}
               <button
                 onClick={() => setMinimized((m) => !m)}
@@ -654,45 +815,31 @@ export default function WatchPage() {
                   aria-hidden
                 />
               )}
-              {!minimized && (
-                <div className="absolute bottom-3 left-3 right-3 z-10 flex items-center gap-3 rounded-xl bg-black/55 px-3 py-2 backdrop-blur">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-white/90">Volume</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={playerVolume}
-                    onChange={(e) => setPlayerVolume(Number(e.target.value))}
-                    className="w-full accent-sky-400"
-                  />
-                  <span className="w-8 text-right text-xs font-semibold text-white/90">{playerVolume}</span>
-                </div>
-              )}
             </CardContent>
           </Card>
         </div>
 
         {/* 🔍 Search Results */}
         {showSearchResults && searchResults.length > 0 && (
-          <div className="bg-white p-4 rounded-xl shadow mb-6">
-            <h2 className="text-lg font-semibold mb-3">Search Results</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="mb-6 rounded-2xl bg-white p-4 shadow">
+            <h2 className="mb-3 text-lg font-semibold">Search Results</h2>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {searchResults.slice(0, 6).map((result, idx) => (
                 <div
-                  key={String(result.id?.videoId || result.id || result.title || idx)}
+                  key={String(getItemVideoId(result) || result.title || idx)}
                   onClick={() => {
-                    const videoId = result.id?.videoId || result.id;
-                    if (videoId) {
-                      playSelectedVideo(videoId);
+                    const nextVideoId = getItemVideoId(result);
+                    if (nextVideoId) {
+                      playSelectedVideo(nextVideoId);
                     }
                   }}
                   className="cursor-pointer group rounded-lg overflow-hidden bg-gray-50 hover:bg-gray-100 transition"
                 >
                   <div className="relative w-full aspect-video bg-gray-200">
-                    {result.snippet?.thumbnails?.default?.url ? (
-                      <img
-                        src={result.snippet.thumbnails.default.url}
-                        alt={result.snippet.title}
+                    {getThumbnailSources(result)[0] ? (
+                      <ThumbnailImage
+                        item={result}
+                        alt={result?.title || result?.snippet?.title || 'Video thumbnail'}
                         className="w-full h-full object-cover"
                       />
                     ) : (
@@ -703,10 +850,10 @@ export default function WatchPage() {
                   </div>
                   <div className="p-3">
                     <h3 className="text-sm font-medium text-gray-900 line-clamp-2">
-                      {result.snippet?.title || 'Untitled Video'}
+                      {result?.title || result?.snippet?.title || 'Untitled Video'}
                     </h3>
                     <p className="text-xs text-gray-600 mt-1">
-                      {result.snippet?.channelTitle || 'Unknown Channel'}
+                      {result?.channelTitle || result?.snippet?.channelTitle || 'Unknown Channel'}
                     </p>
                   </div>
                 </div>
@@ -744,8 +891,8 @@ export default function WatchPage() {
         )}
 
         {/* 💬 Comments with Scroll */}
-        <div className="bg-white p-4 rounded-xl shadow mb-6">
-          <h2 className="text-lg font-semibold mb-3">Comments</h2>
+        <div className="mb-6 rounded-xl bg-white p-4 shadow">
+          <h2 className="mb-3 text-lg font-semibold">Comments</h2>
           <ScrollArea className="h-[300px] pr-4">
             <div className="space-y-4">
               {comments.length === 0 && (
@@ -771,11 +918,11 @@ export default function WatchPage() {
         </div>
 
         {/* 🎞️ Up Next - YouTube Style */}
-        <div className="bg-white rounded-xl shadow">
+        <div className="rounded-xl bg-white shadow">
           <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-lg font-semibold">Up Next</h2>
-              <div className="flex items-center gap-4">
+              <div className="flex w-full flex-wrap items-center gap-4 sm:w-auto sm:justify-end">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input
                     type="checkbox"
@@ -812,18 +959,13 @@ export default function WatchPage() {
                   },
                 },
               }]).map((vid, idx) => {
-                const queueVideoId = vid?.id?.videoId || vid?.id || null;
-                const thumbnailSrc =
-                  vid?.snippet?.thumbnails?.maxres?.url ||
-                  vid?.snippet?.thumbnails?.high?.url ||
-                  vid?.snippet?.thumbnails?.medium?.url ||
-                  vid?.snippet?.thumbnails?.default?.url ||
-                  (queueVideoId ? `https://i.ytimg.com/vi/${queueVideoId}/hqdefault.jpg` : '/file.svg');
+                const queueVideoId = getItemVideoId(vid);
+                const thumbnailSrc = getThumbnailSources(vid)[0];
 
                 return (
                 <div
                   key={String(queueVideoId || idx)}
-                  className={`group cursor-pointer flex gap-3 p-2 rounded-lg transition-colors ${vid.id.videoId === id
+                  className={`group cursor-pointer flex items-start gap-3 p-2 rounded-lg transition-colors ${queueVideoId === id
                     ? 'bg-blue-50 border-l-4 border-blue-500'
                     : 'hover:bg-gray-50'
                     }`}
@@ -834,28 +976,10 @@ export default function WatchPage() {
                 >
                   {/* Thumbnail */}
                   <div className="relative flex-shrink-0">
-                    <img
-                      src={thumbnailSrc}
-                      alt={vid?.snippet?.title || 'Video thumbnail'}
-                      className="w-40 h-24 object-cover rounded-lg"
-                      onError={(e) => {
-                        const img = e.currentTarget;
-                        const fallbackId = queueVideoId || id;
-                        if (!img.dataset.fallbackStep) {
-                          img.dataset.fallbackStep = '1';
-                          img.src = `https://i.ytimg.com/vi/${fallbackId}/mqdefault.jpg`;
-                          return;
-                        }
-                        if (img.dataset.fallbackStep === '1') {
-                          img.dataset.fallbackStep = '2';
-                          img.src = `https://i.ytimg.com/vi/${fallbackId}/default.jpg`;
-                          return;
-                        }
-                        if (img.dataset.fallbackStep === '2') {
-                          img.dataset.fallbackStep = '3';
-                          img.src = '/file.svg';
-                        }
-                      }}
+                    <ThumbnailImage
+                      item={vid}
+                      alt={vid?.title || vid?.snippet?.title || 'Video thumbnail'}
+                      className="h-16 w-28 rounded-lg object-cover sm:h-24 sm:w-40"
                     />
                     {queueVideoId === id && (
                       <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-lg">
@@ -886,10 +1010,10 @@ export default function WatchPage() {
                   {/* Video Info */}
                   <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-medium text-gray-900 line-clamp-2 group-hover:text-blue-600 transition-colors">
-                      {vid?.snippet?.title || 'Untitled Video'}
+                      {vid?.title || vid?.snippet?.title || 'Untitled Video'}
                     </h3>
                     <p className="text-xs text-gray-600 mt-1">
-                      {vid?.snippet?.channelTitle || 'Unknown Channel'}
+                      {vid?.channelTitle || vid?.snippet?.channelTitle || 'Unknown Channel'}
                     </p>
                     {vid?.snippet?.publishedAt && (
                       <p className="text-xs text-gray-500 mt-1">

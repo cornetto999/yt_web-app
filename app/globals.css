@@ -113,6 +113,10 @@
 }
 
 @layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
   * {
     @apply border-border outline-ring/50;
   }
@@ -124,6 +128,7 @@
       linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(236, 245, 252, 0.92));
     background-attachment: fixed;
     min-height: 100vh;
+    overflow-x: hidden;
   }
 }
 
@@ -155,6 +160,17 @@
     transform: translateX(-100%);
     background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
     animation: shimmer 1.35s infinite;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 }
 

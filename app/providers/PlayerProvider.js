@@ -47,6 +47,19 @@ function normalizeTrack(raw) {
   };
 }
 
+function formatDuration(seconds) {
+  const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+
 export function PlayerProvider({ children }) {
   const containerId = 'yt-music-iframe-player';
 
@@ -56,6 +69,9 @@ export function PlayerProvider({ children }) {
   const pendingPlayRef = useRef(false);
   const relatedFetchInFlightRef = useRef(false);
   const hostElRef = useRef(null);
+  const queueRef = useRef([]);
+  const currentIndexRef = useRef(0);
+  const currentTrackRef = useRef(null);
 
   const [queue, setQueue] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -63,8 +79,17 @@ export function PlayerProvider({ children }) {
   const [autoplay, setAutoplayState] = useState(true);
   const [volume, setVolumeState] = useState(80);
   const [blockedAutoplay, setBlockedAutoplay] = useState(false);
+  const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
+  const [currentTimeText, setCurrentTimeText] = useState('0:00');
+  const [currentDurationText, setCurrentDurationText] = useState('');
 
   const currentTrack = queue?.[currentIndex] || null;
+
+  useEffect(() => {
+    queueRef.current = queue;
+    currentIndexRef.current = currentIndex;
+    currentTrackRef.current = currentTrack;
+  }, [queue, currentIndex, currentTrack]);
 
   // Ensure the host DOM node exists outside React-managed tree.
   // This avoids DOM reconciliation issues when the YouTube API mutates the node.
@@ -76,11 +101,13 @@ export function PlayerProvider({ children }) {
       el = document.createElement('div');
       el.id = containerId;
       el.style.position = 'fixed';
-      el.style.width = '0px';
-      el.style.height = '0px';
+      el.style.width = '1px';
+      el.style.height = '1px';
       el.style.overflow = 'hidden';
-      el.style.left = '0px';
-      el.style.top = '0px';
+      el.style.opacity = '0';
+      el.style.pointerEvents = 'none';
+      el.style.left = '-9999px';
+      el.style.top = '-9999px';
       document.body.appendChild(el);
     }
 
@@ -153,11 +180,12 @@ export function PlayerProvider({ children }) {
               playerRef.current.setVolume(volume);
             } catch { }
 
-            if (pendingPlayRef.current && currentTrack?.id) {
+            const pendingTrack = currentTrackRef.current;
+            if (pendingPlayRef.current && pendingTrack?.id) {
               pendingPlayRef.current = false;
               // Try resume
               try {
-                playerRef.current.loadVideoById(currentTrack.id);
+                playerRef.current.loadVideoById(pendingTrack.id);
                 playerRef.current.playVideo();
                 setIsPlaying(true);
                 setBlockedAutoplay(false);
@@ -208,7 +236,7 @@ export function PlayerProvider({ children }) {
     } finally {
       creatingPlayerRef.current = false;
     }
-  }, [autoplay, containerId, currentTrack?.id, volume]);
+  }, [autoplay, containerId, volume]);
 
   // Create player on mount
   useEffect(() => {
@@ -223,24 +251,69 @@ export function PlayerProvider({ children }) {
     } catch { }
   }, [volume]);
 
+  // Keep live time and duration fallbacks from the active YouTube player.
+  useEffect(() => {
+    const fallbackDuration = currentTrack?.duration || '';
+    if (!currentTrack?.id) {
+      setCurrentTimeSeconds(0);
+      setCurrentTimeText('0:00');
+      setCurrentDurationText('');
+      return;
+    }
+
+    const syncTiming = () => {
+      const player = playerRef.current;
+      if (!player || typeof player.getDuration !== 'function') {
+        setCurrentTimeSeconds(0);
+        setCurrentTimeText('0:00');
+        setCurrentDurationText(fallbackDuration);
+        return;
+      }
+
+      try {
+        const currentTime = typeof player.getCurrentTime === 'function' ? player.getCurrentTime() : 0;
+        const duration = player.getDuration();
+        setCurrentTimeSeconds(currentTime);
+        setCurrentTimeText(formatDuration(currentTime));
+        if (duration > 0) {
+          setCurrentDurationText(formatDuration(duration));
+          return;
+        }
+      } catch { }
+
+      setCurrentTimeSeconds(0);
+      setCurrentTimeText('0:00');
+      setCurrentDurationText(fallbackDuration);
+    };
+
+    syncTiming();
+    const intervalId = window.setInterval(syncTiming, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [currentTrack?.id, currentTrack?.duration]);
+
   const playTrack = useCallback(async (video, nextQueue) => {
     if (!video?.id) return;
 
     // Update queue first
     if (Array.isArray(nextQueue) && nextQueue.length) {
       const normalized = dedupeById(nextQueue);
+      queueRef.current = normalized;
       setQueue(normalized);
       const idx = normalized.findIndex((v) => v?.id === video.id);
+      currentIndexRef.current = idx >= 0 ? idx : 0;
       setCurrentIndex(idx >= 0 ? idx : 0);
     } else {
       // Ensure current track exists in queue
       setQueue((prev) => {
         const base = Array.isArray(prev) ? prev : [];
         const merged = dedupeById([video, ...base]);
+        queueRef.current = merged;
         return merged;
       });
+      currentIndexRef.current = 0;
       setCurrentIndex(0);
     }
+    currentTrackRef.current = video;
 
     const p = await ensurePlayer();
     if (!p) return;
@@ -269,14 +342,16 @@ export function PlayerProvider({ children }) {
         return;
       }
 
-      if (currentTrack?.id) {
-        // If player has no video loaded yet, load it
-        try {
-          const url = p.getVideoUrl?.();
-          if (!url) {
-            p.loadVideoById(currentTrack.id);
-          }
-        } catch { }
+      const track = currentTrackRef.current;
+      if (track?.id) {
+        const shouldLoadTrack =
+          state === window.YT.PlayerState.UNSTARTED ||
+          state === window.YT.PlayerState.ENDED ||
+          state === window.YT.PlayerState.CUED;
+
+        if (shouldLoadTrack) {
+          p.loadVideoById(track.id);
+        }
       }
 
       p.playVideo();
@@ -286,38 +361,45 @@ export function PlayerProvider({ children }) {
       setBlockedAutoplay(true);
       setIsPlaying(false);
     }
-  }, [currentTrack?.id, ensurePlayer]);
+  }, [ensurePlayer]);
 
   const next = useCallback(async () => {
-    if (!queue.length) return;
+    const activeQueue = queueRef.current || [];
+    const activeIndex = currentIndexRef.current;
+    const activeTrack = currentTrackRef.current;
 
-    const atEnd = currentIndex >= queue.length - 1;
+    if (!activeQueue.length) return;
+
+    const atEnd = activeIndex >= activeQueue.length - 1;
 
     if (!atEnd) {
-      const nextIdx = currentIndex + 1;
+      const nextIdx = activeIndex + 1;
+      currentIndexRef.current = nextIdx;
       setCurrentIndex(nextIdx);
-      const video = queue[nextIdx];
+      const video = activeQueue[nextIdx];
       if (video?.id) {
-        await playTrack(video, queue);
+        await playTrack(video, activeQueue);
       }
       return;
     }
 
     // At end: fetch related and append
     if (relatedFetchInFlightRef.current) return;
-    if (!currentTrack?.id) return;
+    if (!activeTrack?.id) return;
 
     relatedFetchInFlightRef.current = true;
     try {
-      const relatedData = await fetchRelated(currentTrack.id);
+      const relatedData = await fetchRelated(activeTrack.id);
       const relatedItems = Array.isArray(relatedData?.items) ? relatedData.items : [];
 
-      const merged = dedupeById([...(queue || []), ...relatedItems]);
+      const merged = dedupeById([...(activeQueue || []), ...relatedItems]);
+      queueRef.current = merged;
       setQueue(merged);
 
-      const startIdx = (queue || []).length;
+      const startIdx = activeQueue.length;
       const firstRelated = merged[startIdx];
       if (firstRelated?.id) {
+        currentIndexRef.current = startIdx;
         setCurrentIndex(startIdx);
         await playTrack(firstRelated, merged);
       }
@@ -327,17 +409,20 @@ export function PlayerProvider({ children }) {
     } finally {
       relatedFetchInFlightRef.current = false;
     }
-  }, [queue, currentIndex, currentTrack?.id, playTrack]);
+  }, [playTrack]);
 
   const prev = useCallback(async () => {
-    if (!queue.length) return;
-    const prevIdx = Math.max(0, currentIndex - 1);
+    const activeQueue = queueRef.current || [];
+    const activeIndex = currentIndexRef.current;
+    if (!activeQueue.length) return;
+    const prevIdx = Math.max(0, activeIndex - 1);
+    currentIndexRef.current = prevIdx;
     setCurrentIndex(prevIdx);
-    const video = queue[prevIdx];
+    const video = activeQueue[prevIdx];
     if (video?.id) {
-      await playTrack(video, queue);
+      await playTrack(video, activeQueue);
     }
-  }, [queue, currentIndex, playTrack]);
+  }, [playTrack]);
 
   const setAutoplay = useCallback((v) => {
     setAutoplayState(Boolean(v));
@@ -346,7 +431,13 @@ export function PlayerProvider({ children }) {
   const setVolume = useCallback((v) => {
     const n = Number(v);
     if (Number.isNaN(n)) return;
-    setVolumeState(Math.max(0, Math.min(100, n)));
+    const nextVolume = Math.max(0, Math.min(100, n));
+    setVolumeState(nextVolume);
+    const player = playerRef.current;
+    if (!player || typeof player.setVolume !== 'function') return;
+    try {
+      player.setVolume(nextVolume);
+    } catch { }
   }, []);
 
   // Custom events for compatibility / imperative control
@@ -369,6 +460,7 @@ export function PlayerProvider({ children }) {
         title: payload.title,
         channelTitle: payload.channelTitle,
         thumbnailUrl: payload.thumbnailUrl,
+        duration: payload.duration,
       });
       if (!track) return;
 
@@ -387,7 +479,7 @@ export function PlayerProvider({ children }) {
       if (!p) return;
 
       try {
-        p.loadVideoById(track.id);
+        p.loadVideoById(track.id, typeof payload?.time === 'number' ? payload.time : 0);
         if (typeof payload?.time === 'number' && payload.time > 0) {
           try { p.seekTo(payload.time, true); } catch { }
         }
@@ -419,6 +511,9 @@ export function PlayerProvider({ children }) {
       isPlaying,
       autoplay,
       volume,
+      currentTimeSeconds,
+      currentTimeText,
+      currentDurationText,
       blockedAutoplay,
       playTrack,
       togglePlay,
@@ -427,7 +522,7 @@ export function PlayerProvider({ children }) {
       setAutoplay,
       setVolume,
     };
-  }, [currentTrack, queue, currentIndex, isPlaying, autoplay, volume, blockedAutoplay, playTrack, togglePlay, next, prev, setAutoplay, setVolume]);
+  }, [currentTrack, queue, currentIndex, isPlaying, autoplay, volume, currentTimeSeconds, currentTimeText, currentDurationText, blockedAutoplay, playTrack, togglePlay, next, prev, setAutoplay, setVolume]);
 
   return (
     <PlayerContext.Provider value={value}>
